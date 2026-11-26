@@ -17,7 +17,10 @@ test('импорт меню скачивает задание для ИИ, пр�
     form.getByRole('link', { name: 'Скачать инструкцию для ИИ', exact: true }).click(),
   ])
   expect(download.suggestedFilename()).toMatch(/\.txt$/i)
-  expect(await readFile(await download.path(), 'utf8')).toMatch(/JSON/)
+  expect(await readFile(await download.path(), 'utf8')).toMatch(/вкладкой каталога/)
+  await form.getByRole('button', { name: 'Открыть текст инструкции' }).click()
+  await expect(form.getByLabel('Текст инструкции для ИИ')).toHaveValue(/вкладкой каталога/)
+  await form.getByRole('button', { name: 'Скрыть текст инструкции' }).click()
 
   const input = form.getByLabel('JSON меню', { exact: true })
   const check = form.getByRole('button', { name: 'Проверить меню', exact: true })

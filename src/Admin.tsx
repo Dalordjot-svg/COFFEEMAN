@@ -1,7 +1,7 @@
 import { cloneElement, useEffect, useId, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import {
   Activity, Archive, ArrowLeft, Check, ChevronRight,
-  ClipboardList, Coffee, Download, History, Image as ImageIcon, LayoutGrid,
+  ClipboardList, Coffee, Copy, Download, History, Image as ImageIcon, LayoutGrid,
   ListFilter, LogOut, Menu, Package, Plus, Search, Settings as SettingsIcon, Upload,
   Sofa, Tag, UsersRound, X,
 } from 'lucide-react'
@@ -13,6 +13,7 @@ import {
 } from './domain'
 import { previewMenuImport } from './menu-import'
 import menuImportGuide from './menu-import-instructions.txt?url'
+import menuImportText from './menu-import-instructions.txt?raw'
 import './admin.css'
 
 type Props = {
@@ -237,6 +238,9 @@ function Catalog({ state, open }: { state: State; open: (dialog: Dialog) => void
 
 function MenuImport({ state, execute }: { state: State; execute: Props['execute'] }) {
   const [json, setJson] = useState('')
+  const [showGuide, setShowGuide] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
+  const guideText = useRef<HTMLTextAreaElement>(null)
   const [checked, setChecked] = useState(false)
   const [working, setWorking] = useState(false)
   const [failure, setFailure] = useState('')
@@ -264,6 +268,23 @@ function MenuImport({ state, execute }: { state: State; execute: Props['execute'
     <a className="secondary admin-guide-download" href={menuImportGuide} download="coffeeman-menu-import.txt">
       <Download size={18} />Скачать инструкцию для ИИ
     </a>
+    <button type="button" className="secondary" onClick={() => setShowGuide(value => !value)} aria-expanded={showGuide}>
+      {showGuide ? 'Скрыть текст инструкции' : 'Открыть текст инструкции'}
+    </button>
+    {showGuide && <>
+      <Field label="Текст инструкции для ИИ"><textarea ref={guideText} rows={7} readOnly value={menuImportText.trimStart()} /></Field>
+      <button type="button" className="secondary" onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(menuImportText.trimStart())
+          setCopyStatus('Инструкция скопирована')
+        } catch {
+          guideText.current?.focus()
+          guideText.current?.select()
+          setCopyStatus('Текст выделен. Нажмите «Копировать» в меню устройства.')
+        }
+      }}><Copy size={18} />Копировать инструкцию</button>
+      {copyStatus && <p className="admin-hint" role="status">{copyStatus}</p>}
+    </>}
     <p className="admin-hint">Передайте ИИ инструкцию и исходное меню. Вставьте полученный JSON и проверьте, какие позиции добавятся.</p>
     <Field label="JSON меню"><textarea rows={7} value={json} spellCheck={false} autoCapitalize="off" disabled={working}
       onChange={event => { setJson(event.target.value); setChecked(false); setFailure(''); setImported(undefined) }} /></Field>
