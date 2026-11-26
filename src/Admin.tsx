@@ -72,6 +72,7 @@ const auditNames: Record<string, string> = {
   registerUser: 'Вход сотрудника',
   saveProduct: 'Изменение товара',
   importMenu: 'Импорт меню',
+  clearCatalog: 'Очистка каталога',
   saveCategory: 'Изменение категории',
   saveModifier: 'Изменение модификатора',
   saveHall: 'Изменение зала',
@@ -197,7 +198,19 @@ function CatalogProductRow({ state, product, onClick }: { state: State; product:
   </button>
 }
 
-function Catalog({ state, open }: { state: State; open: (dialog: Dialog) => void }) {
+function Catalog({ state, open, execute }: { state: State; open: (dialog: Dialog) => void; execute: Props['execute'] }) {
+  const [clearing, setClearing] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+  const [slide, setSlide] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState('')
+  async function clear() {
+    if (!confirmed || busy) return
+    setBusy(true)
+    try { await execute({type: 'clearCatalog'}); setClearing(false); setConfirmed(false) }
+    catch (error) { setFailure(message(error)) }
+    finally { setBusy(false); setSlide(0) }
+  }
   const [section, setSection] = useState<'products' | 'categories'>('products')
   const [query, setQuery] = useState('')
   const [archived, setArchived] = useState(false)
@@ -219,6 +232,14 @@ function Catalog({ state, open }: { state: State; open: (dialog: Dialog) => void
         <button type="button" className="admin-add" onClick={() => open({ kind: 'product' })}><Plus size={19} />Добавить товар</button>
         <button type="button" className="admin-add" onClick={() => open({ kind: 'import' })}><Upload size={17} />Импорт меню</button>
       </div>
+      <button type="button" className="admin-add" style={{color:'#ff7777'}} onClick={() => {setClearing(!clearing);setConfirmed(false);setSlide(0);setFailure('')}}>Удалить все позиции</button>
+      {clearing && <div className="admin-panel" style={{padding:16}}>
+        <p>Все товары будут архивированы. История заказов сохранится.</p>
+        <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={e=>{setConfirmed(e.target.checked);setSlide(0)}} /> Подтверждаю очистку каталога</label>
+        <p>Проведите вправо для удаления</p>
+        <input aria-label="Проведите вправо для удаления" type="range" min={0} max={100} value={slide} disabled={!confirmed || busy} style={{width:'100%',touchAction:'none',accentColor:'#e34b55'}} onChange={e=>setSlide(Number(e.target.value))} onPointerUp={e=>{if(Number(e.currentTarget.value)===100) void clear();else setSlide(0)}} onKeyUp={e=>{if(e.key==='Enter' && slide===100) void clear()}} />
+        {failure && <p role="alert">{failure}</p>}
+      </div>}
       <div className="admin-panel">
         {products.map(product => <CatalogProductRow key={product.id} product={product} state={state}
           onClick={() => open({ kind: 'product', value: product })} />)}
@@ -804,7 +825,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
       </header>
       <div className="admin-page" key={page}>
         {page === 'overview' && <Overview state={state} open={setDialog} navigate={navigate} />}
-        {page === 'catalog' && <Catalog state={state} open={setDialog} />}
+        {page === 'catalog' && <Catalog state={state} open={setDialog} execute={execute} />}
         {page === 'floor' && <Floor state={state} open={setDialog} />}
         {page === 'staff' && <Staff state={state} onlineUserIds={onlineUserIds} open={setDialog} />}
         {page === 'orders' && <Orders state={state} open={setDialog} />}

@@ -71,6 +71,7 @@ export type Command =
   | { type: 'assignOrder'; orderId: string; waiterId: string }
   | { type: 'saveSettings'; settings: Settings }
   | { type: 'importMenu'; json: string }
+  | { type: 'clearCatalog' }
 
 type Stamp = { id: string; now: number }
 type Candidate = Record<string, unknown>
@@ -549,7 +550,7 @@ function stockUpdates(before: State, after: State, stamp: Stamp, ids: Set<string
 }
 
 const adminCommands: ReadonlySet<Command['type']> = new Set([
-  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu',
+  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearCatalog',
 ])
 
 function importEntityId(record: Record<string, unknown>, operationId: string, position: number) {
@@ -785,6 +786,12 @@ export function applyCommand(previous: State, session: Session, command: Command
       if (command.available !== undefined) product.available = checkFlag(command.available, 'доступность')
       inventoryIds.add(product.id)
       detail = product.name
+      break
+    }
+    case 'clearCatalog': {
+      requireCondition(session.role === 'admin', 'Действие доступно администратору')
+      for (const product of entries(state.products)) { product.archived = true; product.available = false }
+      detail = 'Все товары архивированы'
       break
     }
     case 'saveProduct': {
