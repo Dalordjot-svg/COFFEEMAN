@@ -223,3 +223,24 @@ a { color: var(--blue); }
 .quick-sheet .quick-close { position: absolute; bottom: calc(54px + var(--safe-bottom)); inset-inline-end: 6px; background: var(--blue-fill); color: #fff; min-width: 48px; min-height: 48px; }
 .showing-quick > :is(main, div, nav):not(.toast) { filter: blur(5px); }
 .showing-quick .order-fab { visibility: hidden; }
+
+/* Mobile viewport: preserve native scrolling and system text input. */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+    font-size: 16px !important;
+    scroll-margin-block: 16px;
+  }
+  html[data-keyboard-open] .bottom-nav,
+  html[data-keyboard-open] .order-fab { visibility: hidden; }
+  html[data-keyboard-open] .app-shell.with-nav { padding-bottom: 16px; }
+  html[data-keyboard-open] .order-bottom { position: static; }
+  html[data-keyboard-open] .login-page,
+  html[data-keyboard-open] .app-shell,
+  html[data-keyboard-open] .order-screen { min-height: var(--mobile-visible-height, 100dvh); }
+  html[data-keyboard-open] .root-sheet:not(.quick-sheet) {
+    bottom: var(--mobile-viewport-bottom, 0px);
+    max-height: calc(var(--mobile-visible-height, 100dvh) - 24px);
+  }
+  html[data-keyboard-open] body { padding-bottom: var(--mobile-viewport-bottom, 0px); }
+}
