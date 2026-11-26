@@ -1,14 +1,13 @@
 import { expect, type Page } from '@playwright/test'
 
-const onboardingHandlers = new WeakSet<Page>()
+const preparedLogin = new WeakSet<Page>()
 
 export async function openLogin(page: Page) {
-  if (!onboardingHandlers.has(page)) {
-    const guide = page.getByRole('dialog', { name: 'Установить COFFEEMAN', exact: true })
-    await page.addLocatorHandler(guide, async () => {
-      await guide.getByRole('button', { name: 'Позже', exact: true }).click()
+  if (!preparedLogin.has(page)) {
+    await page.addInitScript(() => {
+      localStorage.setItem('coffeeman:install-guide:v1', '1')
     })
-    onboardingHandlers.add(page)
+    preparedLogin.add(page)
   }
   await page.goto('/')
 }
@@ -18,6 +17,8 @@ export async function signIn(page: Page, name = 'Паша', remember = true) {
   await page.getByLabel('Имя сотрудника').fill(name)
   if (!remember) await page.getByLabel('Запомнить меня').uncheck()
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  const heading = name.trim().toLowerCase() === 'admin' ? 'Управление' : 'Главная'
+  await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
 }
 
 export async function tab(page: Page, name: string) {
