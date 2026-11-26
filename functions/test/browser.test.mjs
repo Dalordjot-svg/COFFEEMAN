@@ -21,7 +21,26 @@ async function account(role) {
   const email = `${randomUUID()}@coffeeman.test`
   const created = await getAuth().createUser({ email, password, displayName: 'Проверка Firebase' })
   await getAuth().setCustomUserClaims(created.uid, { coffeemanRole: role })
-  return email
+  return { email, uid: created.uid }
+}
+
+async function adminPresenceReader(email) {
+  const authUrl = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=emulator-test-key'
+  const authenticated = await fetch(authUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  })
+  if (!authenticated.ok) throw new Error('Could not sign in to inspect Firebase presence')
+  const { idToken } = await authenticated.json()
+  return async (uid) => {
+    const url = new URL(`http://127.0.0.1:9000/coffeeman/presence/${uid}.json`)
+    url.searchParams.set('ns', 'demo-coffeeman-default-rtdb')
+    url.searchParams.set('auth', idToken)
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('Could not read Firebase presence')
+    return Object.keys((await response.json()) ?? {}).length
+  }
 }
 
 async function startApp() {
@@ -65,19 +84,26 @@ async function login(context, email) {
   return page
 }
 
-test('Firebase browser sessions synchronize and recover after going offline', { timeout: 60000 }, async () => {
+test('Firebase browser sessions synchronize, report presence and recover after going offline', { timeout: 60000 }, async () => {
   const server = await startApp()
   try {
     const systemChromium = '/usr/bin/chromium'
     const executablePath = process.env.QA_CHROMIUM_PATH || (existsSync(systemChromium) ? systemChromium : undefined)
     const browser = await chromium.launch({ executablePath })
     try {
-      const [adminEmail, waiterEmail] = await Promise.all([account('admin'), account('waiter')])
+      const [adminAccount, waiterAccount] = await Promise.all([account('admin'), account('waiter')])
       const [adminContext, waiterContext] = await Promise.all([
         browser.newContext({ viewport: { width: 390, height: 844 } }),
         browser.newContext({ viewport: { width: 390, height: 844 } }),
       ])
-      const [admin, waiter] = await Promise.all([login(adminContext, adminEmail), login(waiterContext, waiterEmail)])
+      const [admin, waiter] = await Promise.all([login(adminContext, adminAccount.email), login(waiterContext, waiterAccount.email)])
+      const presenceCount = await adminPresenceReader(adminAccount.email)
+      const waiterConnections = () => presenceCount(waiterAccount.uid)
+      const secondDevice = await browser.newContext({ viewport: { width: 390, height: 844 } })
+      await login(secondDevice, waiterAccount.email)
+      await expect.poll(waiterConnections).toBe(2)
+      await secondDevice.close()
+      await expect.poll(waiterConnections).toBe(1)
       await admin.getByRole('button', { name: 'Каталог', exact: true }).click()
       await admin.getByRole('button', { name: 'Категории', exact: true }).click()
       await admin.getByRole('button', { name: 'Добавить категорию' }).click()
@@ -98,12 +124,14 @@ test('Firebase browser sessions synchronize and recover after going offline', { 
       await expect(waiter.getByRole('heading', { name: 'Главная' })).toBeVisible({ timeout: 20000 })
       await waiterContext.setOffline(true)
       await expect(waiter.getByText(/Firebase.*Соединение|Нет интернета/)).toBeVisible()
+      await expect.poll(waiterConnections, { timeout: 15000 }).toBe(0)
       await waiter.getByRole('button', { name: 'Стоп-лист', exact: true }).click()
       await admin.getByRole('button', { name: 'Сохранить', exact: true }).click()
       await expect(admin.getByText(product, { exact: true })).toBeVisible()
       await expect(waiter.getByText(product, { exact: true })).toHaveCount(0)
       await waiterContext.setOffline(false)
       await expect(waiter.getByText(product, { exact: true })).toBeVisible({ timeout: 20000 })
+      await expect.poll(waiterConnections).toBe(1)
       await waiter.getByRole('button', { name: 'Главная', exact: true }).click()
       await expect(waiter.getByText('Firebase · Синхронизация активна')).toBeVisible()
     } finally {

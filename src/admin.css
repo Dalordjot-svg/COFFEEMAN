@@ -422,3 +422,49 @@ html:has(.admin-modal[open]) { overflow: hidden; }
 
 .admin-modal .admin-dialog-heading { top: 0; }
 .admin-modal .admin-form-actions { bottom: 0; padding-block: 5px; }
+
+.admin-catalog-actions { flex-wrap: wrap; }
+
+.admin-staff-summary {
+  margin: 0;
+  color: var(--muted, #a1a1a9);
+  font-size: 13px;
+}
+.admin-staff-summary strong { color: var(--text, #f5f5f7); }
+
+.admin-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--muted, #a1a1a9);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.admin-presence::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.admin-presence-online { color: var(--green, #4bd688); }
+
+.admin-import, .admin-import-result {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+.admin-import .admin-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.admin-guide-download { text-decoration: none; }
+.admin-import textarea { font-family: ui-monospace, monospace; }
+.admin-import-warnings {
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 5px 0 22px;
+  color: var(--muted, #a1a1a9);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.admin-import-warnings li + li { margin-top: 4px; }

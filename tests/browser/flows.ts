@@ -1,7 +1,20 @@
 import { expect, type Page } from '@playwright/test'
 
-export async function signIn(page: Page, name = 'Паша', remember = true) {
+const onboardingHandlers = new WeakSet<Page>()
+
+export async function openLogin(page: Page) {
+  if (!onboardingHandlers.has(page)) {
+    const guide = page.getByRole('dialog', { name: 'Установить COFFEEMAN', exact: true })
+    await page.addLocatorHandler(guide, async () => {
+      await guide.getByRole('button', { name: 'Позже', exact: true }).click()
+    })
+    onboardingHandlers.add(page)
+  }
   await page.goto('/')
+}
+
+export async function signIn(page: Page, name = 'Паша', remember = true) {
+  await openLogin(page)
   await page.getByLabel('Имя сотрудника').fill(name)
   if (!remember) await page.getByLabel('Запомнить меня').uncheck()
   await page.getByRole('button', { name: 'Войти', exact: true }).click()

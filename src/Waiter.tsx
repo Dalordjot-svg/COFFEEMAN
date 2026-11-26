@@ -3,7 +3,7 @@ import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import {
   Activity, ArrowLeft, Bell, ChartNoAxesColumnIncreasing, ChevronRight, CircleCheck,
   ClipboardList, Ellipsis, Info, LogOut, Minus, Package, Pencil, Plus,
-  Search, Settings2, Vibrate, Volume2, Wifi, X,
+  Search, Settings2, Smartphone, Vibrate, Volume2, Wifi, X,
 } from 'lucide-react'
 import {
   availableQuantity, entries, orderAlerts, orderStatus, orderStatusLabel, orderTitle, orderTotal, stats, stockStatus,
@@ -172,10 +172,10 @@ const preferenceRows = [
   { key: 'connection', label: 'Состояние синхронизации', Icon: Wifi },
 ] as const
 
-export function Profile({ state, user, now, screen, navigate, preferences, setPreference, connection, period, setPeriod, notify, openOrder, logout }: {
+export function Profile({ state, user, now, screen, navigate, preferences, setPreference, connection, period, setPeriod, onInstall, notify, openOrder, logout }: {
   state: State; user: Session; now: number; screen: ProfileScreen; navigate: (screen: ProfileScreen) => void; preferences: Preferences;
   setPreference: (key: keyof Preferences, value: boolean) => void; connection: string; period: Period; setPeriod: (period: Period) => void;
-  notify: () => void; openOrder: (id: string) => void; logout: () => void;
+  onInstall?: () => void; notify: () => void; openOrder: (id: string) => void; logout: () => void;
 }) {
   const [info, setInfo] = useState(false)
   const title = { profile: 'Профиль', stats: 'Моя статистика', history: 'История заказов', settings: 'Настройки' }
@@ -217,7 +217,10 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
     )}{history.length === 0 && <div className="panel"><Empty icon={<ClipboardList size={21} />} title="За этот период заказов нет" /></div>}</div>}
     {screen === 'settings' && <>
       <div className="settings-group panel">{preferenceRows.map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />} detail={key === 'connection' ? connection : undefined} value={preferences[key]} onChange={value => setPreference(key, value)} />)}</div>
-      <div className="action-list panel"><ActionRow icon={<Info size={18} />} label="О приложении" detail="Версия 1.0.0" onClick={() => setInfo(true)} /></div>
+      <div className="action-list panel">
+        {onInstall && <ActionRow icon={<Smartphone size={18} />} label="Как установить приложение" onClick={onInstall} />}
+        <ActionRow icon={<Info size={18} />} label="О приложении" detail="Версия 1.0.0" onClick={() => setInfo(true)} />
+      </div>
     </>}
     {info && <Sheet title="О приложении" onClose={() => setInfo(false)}><p>COFFEEMAN — Waiter System</p><p className="sheet-note">Версия 1.0.0. Рабочее пространство для заказов, остатков и статистики.</p><button className="secondary" onClick={() => setInfo(false)}><X size={16} /> Закрыть</button></Sheet>}
   </main>

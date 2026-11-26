@@ -73,6 +73,17 @@ test('Firebase enforces staff roles and reserves the last unit across distinct a
   assert.equal((await realtime(admin, 'coffeeman/orders', 'unsafe write')).status, 401)
   assert.equal((await realtime(waiter1, 'coffeeman/auditLogs')).status, 401)
 
+  const lease = randomUUID().replaceAll('-', '')
+  const ownLease = `coffeeman/presence/${waiter1.uid}/${lease}`
+  const otherLease = `coffeeman/presence/${waiter2.uid}/${lease}`
+  const timestamp = { '.sv': 'timestamp' }
+  assert.equal((await realtime(waiter1, ownLease, timestamp)).status, 200)
+  assert.equal((await realtime(waiter1, otherLease, timestamp)).ok, false)
+  assert.equal((await realtime(outsider, `coffeeman/presence/${outsider.uid}/${lease}`, timestamp)).ok, false)
+  assert.equal((await realtime(waiter1, ownLease, Date.now() + 60000)).ok, false)
+  assert.equal((await realtime(waiter1, 'coffeeman/presence')).ok, false)
+  assert.equal(typeof await read(admin, ownLease), 'number')
+
   const category = { id: randomUUID(), name: 'Тестовая категория', color: '#2778ff', sort: 1 }
   const product = { id: randomUUID(), name: 'Последний десерт', categoryId: category.id, price: 120, available: true, sort: 1 }
   assert.notEqual((await command(waiter1, { type: 'saveCategory', category })).status, 200)
@@ -114,4 +125,44 @@ test('Firebase enforces staff roles and reserves the last unit across distinct a
   await run(admin, { type: 'updateUser', userId: waiter1.uid, active: false })
   assert.equal((await realtime(waiter1, 'coffeeman/orders')).status, 401)
   assert.notEqual((await command(waiter1, { type: 'registerUser' })).status, 200)
+  assert.equal((await realtime(waiter1, ownLease, timestamp)).ok, false)
+  assert.equal((await realtime(waiter1, ownLease, null)).status, 200)
+})
+
+test('Firebase imports a large menu in one admin operation and rejects invalid or unauthorized imports', async () => {
+  const [admin, waiter] = await Promise.all([user('admin'), user('waiter')])
+  await Promise.all([admin, waiter].map(actor => run(actor, { type: 'registerUser' })))
+  const categoryName = 'Импорт напитков ' + randomUUID().slice(0, 8)
+  const products = Array.from({ length: 18 }, (_, index) => ({
+    name: `Напиток №${index + 1}`,
+    category: categoryName,
+    price: 155.5 + index,
+    description: 'Свежее зерно '.repeat(70).trim(),
+    quantity: index + 1,
+  }))
+  const json = JSON.stringify({ products })
+  assert.ok(Buffer.byteLength(json) > 17000)
+  const action = { type: 'importMenu', json }
+  assert.equal((await command(waiter, action)).status, 403)
+  const operationId = await run(admin, action)
+  await run(admin, action, operationId)
+  await run(admin, action)
+
+  const category = Object.values(await read(waiter, 'coffeeman/categories')).find(entry => entry.name === categoryName)
+  assert.ok(category)
+  const imported = Object.values(await read(waiter, 'coffeeman/products')).filter(entry => entry.categoryId === category.id)
+  assert.equal(imported.length, products.length)
+  const first = imported.find(entry => entry.name === products[0].name)
+  assert.equal(first.price, products[0].price)
+  assert.equal((await read(waiter, `coffeeman/inventory/${first.id}`)).quantity, 1)
+  const invalidCategory = 'Недействительный импорт ' + randomUUID().slice(0, 8)
+  const bad = {
+    type: 'importMenu',
+    json: JSON.stringify({ products: [
+      { name: 'Корректная строка', category: invalidCategory, price: 75 },
+      { name: 'Строка с ошибкой', category: invalidCategory, price: -15 },
+    ] }),
+  }
+  assert.notEqual((await command(admin, bad)).status, 200)
+  assert.equal(Object.values(await read(waiter, 'coffeeman/categories')).some(entry => entry.name === invalidCategory), false)
 })

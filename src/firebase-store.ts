@@ -4,17 +4,92 @@ import {
   getAuth, getIdTokenResult, setPersistence, signInWithEmailAndPassword, signOut,
 } from 'firebase/auth'
 import type { User as AuthUser } from 'firebase/auth'
-import { connectDatabaseEmulator, get, getDatabase, onValue, ref } from 'firebase/database'
+import {
+  connectDatabaseEmulator, get, getDatabase, onDisconnect, onValue, ref, remove, serverTimestamp, set,
+} from 'firebase/database'
+import type { Database } from 'firebase/database'
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions'
 import { emptyState, newId, normalizeState } from './domain'
 import type { Command, Session, State, User } from './domain'
-import { asError, connectionSubscribe, deviceId } from './device-store'
-import type { CommandResult, Connection, ErrorListener, Listener, Store } from './store'
+import { asError, connectionSubscribe, deviceId, presenceExpiryMs, presencePulseMs } from './device-store'
+import type { CommandResult, Connection, ErrorListener, Listener, PresenceListener, Store } from './store'
 
 const sharedCollections = [
   'users', 'categories', 'products', 'modifiers', 'halls', 'tables',
   'orders', 'inventory', 'inventoryReservations', 'notifications', 'settings',
 ] as const
+
+function startFirebasePresence(database: Database, actor: Session, listener: PresenceListener, onError?: ErrorListener) {
+  const path = ref(database, `coffeeman/presence/${actor.userId}/${newId()}`)
+  let active = true
+  let online = false
+  let generation = 0
+  let armed = false
+  let offset = 0
+  let leases: Record<string, Record<string, number>> = {}
+  let published: string | undefined
+
+  function report(error: unknown) {
+    if (active && online) onError?.(asError(error))
+  }
+
+  function publish() {
+    const cutoff = Date.now() + offset - presenceExpiryMs
+    const users = new Set(Object.keys(leases).filter(uid =>
+      Object.values(leases[uid] ?? {}).some(at => typeof at === 'number' && at > cutoff),
+    ))
+    const signature = [...users].sort().join(',')
+    if (signature === published) return
+    published = signature
+    listener(users)
+  }
+
+  function renew() {
+    if (active && online && armed) void set(path, serverTimestamp()).catch(report)
+  }
+
+  const unsubscribeConnection = onValue(ref(database, '.info/connected'), snapshot => {
+    online = snapshot.val() === true
+    generation += 1
+    armed = false
+    if (!active || !online) return
+    const current = generation
+    // Register the disconnect cleanup before making the connection visible.
+    void onDisconnect(path).remove().then(() => {
+      if (!active || !online || generation !== current) return
+      armed = true
+      renew()
+    }).catch(report)
+  }, report)
+
+  const admin = actor.role === 'admin'
+  const unsubscribeLeases = admin && onValue(ref(database, 'coffeeman/presence'), snapshot => {
+    leases = snapshot.val() ?? {}
+    publish()
+  }, report)
+  const unsubscribeOffset = admin && onValue(ref(database, '.info/serverTimeOffset'), snapshot => {
+    const value: unknown = snapshot.val()
+    offset = typeof value === 'number' ? value : 0
+    publish()
+  }, report)
+
+  publish()
+  const interval = window.setInterval(() => {
+    renew()
+    if (admin) publish()
+  }, presencePulseMs)
+
+  return async () => {
+    active = false
+    window.clearInterval(interval)
+    unsubscribeConnection()
+    if (unsubscribeLeases) unsubscribeLeases()
+    if (unsubscribeOffset) unsubscribeOffset()
+    if (!online) return
+    // The queued server cleanup also covers a connection lost during logout.
+    await remove(path).catch(() => undefined)
+  }
+}
 
 export function createFirebaseStore(): Store {
   const config = {
@@ -51,6 +126,7 @@ export function createFirebaseStore(): Store {
   let current: State | undefined
   let unsubscribe: (() => void)[] = []
   const listeners = new Map<Listener, ErrorListener | undefined>()
+  const presenceStops = new Set<() => Promise<void>>()
 
   function stop() {
     for (const detach of unsubscribe) detach()
@@ -193,6 +269,19 @@ export function createFirebaseStore(): Store {
       }
     },
 
+    subscribePresence(listener, onError) {
+      if (!session) {
+        listener(new Set())
+        return () => undefined
+      }
+      const close = startFirebasePresence(services().database, session, listener, onError)
+      const stopPresence = async () => {
+        if (presenceStops.delete(stopPresence)) await close()
+      }
+      presenceStops.add(stopPresence)
+      return () => { void stopPresence() }
+    },
+
     async login(email, remember, password) {
       if (!email.trim() || !password) throw new Error('Введите адрес электронной почты и пароль')
       const { auth } = services()
@@ -219,6 +308,11 @@ export function createFirebaseStore(): Store {
     },
 
     async logout() {
+      const release = Promise.allSettled([...presenceStops].map(stopPresence => stopPresence()))
+      await new Promise<void>(resolve => {
+        const timeout = window.setTimeout(resolve, 650)
+        void release.finally(() => { window.clearTimeout(timeout); resolve() })
+      })
       session = null
       stop()
       await signOut(services().auth)

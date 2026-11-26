@@ -1,8 +1,8 @@
 import { cloneElement, useEffect, useId, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import {
   Activity, Archive, ArrowLeft, Check, ChevronRight,
-  ClipboardList, Coffee, Database, History, Image as ImageIcon, LayoutGrid,
-  ListFilter, LogOut, Menu, Package, Plus, Search, Settings as SettingsIcon,
+  ClipboardList, Coffee, Database, Download, History, Image as ImageIcon, LayoutGrid,
+  ListFilter, LogOut, Menu, Package, Plus, Search, Settings as SettingsIcon, Upload,
   Sofa, Tag, UsersRound, X,
 } from 'lucide-react'
 import {
@@ -11,6 +11,8 @@ import {
   type Category, type Command, type Hall, type Modifier, type Order, type PriceOption, type Product,
   type Session, type Settings, type State, type Table, type User,
 } from './domain'
+import { previewMenuImport } from './menu-import'
+import menuImportGuide from './menu-import-instructions.txt?url'
 import './admin.css'
 
 type Props = {
@@ -21,6 +23,7 @@ type Props = {
   onLogout: () => void
   connection: string
   mode: 'demo' | 'firebase'
+  onlineUserIds: ReadonlySet<string>
 }
 
 type PriceDraft = Omit<PriceOption, 'price'> & { price: string }
@@ -29,6 +32,7 @@ type ModifierDraft = Omit<Modifier, 'options'> & { options: PriceDraft[] }
 type Page = 'overview' | 'catalog' | 'floor' | 'staff' | 'more' | 'orders' | 'settings' | 'audit'
 type Dialog =
   | { kind: 'product'; value?: Product }
+  | { kind: 'import' }
   | { kind: 'category'; value?: Category }
   | { kind: 'hall'; value?: Hall }
   | { kind: 'table'; value?: Table }
@@ -68,6 +72,7 @@ const colorValue = (color: string | undefined) => color && /^#[a-f0-9]{6}$/i.tes
 const auditNames: Record<string, string> = {
   registerUser: 'Вход сотрудника',
   saveProduct: 'Изменение товара',
+  importMenu: 'Импорт меню',
   saveCategory: 'Изменение категории',
   saveModifier: 'Изменение модификатора',
   saveHall: 'Изменение зала',
@@ -94,12 +99,13 @@ const auditNames: Record<string, string> = {
   updateInventory: 'Изменение остатка',
 }
 
-function ActionRow({ icon, label, detail, onClick, danger = false }: {
-  icon: ReactNode; label: string; detail?: string; onClick: () => void; danger?: boolean
+function ActionRow({ icon, label, detail, trailing, onClick, danger = false }: {
+  icon: ReactNode; label: string; detail?: string; trailing?: ReactNode; onClick: () => void; danger?: boolean
 }) {
   return <button type="button" className={`admin-row admin-action ${danger ? 'admin-danger' : ''}`} onClick={onClick}>
     <span className="admin-row-icon">{icon}</span>
     <span className="admin-row-copy"><strong>{label}</strong>{detail && <small>{detail}</small>}</span>
+    {trailing}
     <ChevronRight size={17} className="admin-chevron" />
   </button>
 }
@@ -212,7 +218,10 @@ function Catalog({ state, open }: { state: State; open: (dialog: Dialog) => void
       <button type="button" className="admin-icon-button" aria-label="Архив" aria-pressed={archived} onClick={() => setArchived(!archived)}><Archive size={19} /></button>
     </div>
     {section === 'products' ? <>
-      <button type="button" className="admin-add" onClick={() => open({ kind: 'product' })}><Plus size={19} />Добавить товар</button>
+      <div className="admin-toolbar admin-catalog-actions">
+        <button type="button" className="admin-add" onClick={() => open({ kind: 'product' })}><Plus size={19} />Добавить товар</button>
+        <button type="button" className="admin-add" onClick={() => open({ kind: 'import' })}><Upload size={17} />Импорт меню</button>
+      </div>
       <div className="admin-panel">
         {products.map(product => <CatalogProductRow key={product.id} product={product} state={state}
           onClick={() => open({ kind: 'product', value: product })} />)}
@@ -228,6 +237,60 @@ function Catalog({ state, open }: { state: State; open: (dialog: Dialog) => void
       </div>
     </>}
   </>
+}
+
+function MenuImport({ state, execute }: { state: State; execute: Props['execute'] }) {
+  const [json, setJson] = useState('')
+  const [checked, setChecked] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [failure, setFailure] = useState('')
+  const [imported, setImported] = useState<ReturnType<typeof previewMenuImport>>()
+  let preview: ReturnType<typeof previewMenuImport> | undefined
+  let invalid = ''
+  if (checked && !imported) {
+    try { preview = previewMenuImport(state, json) }
+    catch (error) { invalid = message(error) }
+  }
+
+  async function submitImport() {
+    if (working || !preview || (!preview.categoryCount && !preview.productCount)) return
+    setWorking(true)
+    setFailure('')
+    try {
+      await execute({ type: 'importMenu', json })
+      setImported(preview)
+    } catch (error) { setFailure(message(error)) }
+    finally { setWorking(false) }
+  }
+
+  const result = imported ?? preview
+  return <div className="admin-import">
+    <a className="secondary admin-guide-download" href={menuImportGuide} download="coffeeman-menu-import.txt">
+      <Download size={18} />Скачать инструкцию для ИИ
+    </a>
+    <p className="admin-hint">Передайте ИИ инструкцию и исходное меню. Вставьте полученный JSON и проверьте, какие позиции добавятся.</p>
+    <Field label="JSON меню"><textarea rows={7} value={json} spellCheck={false} autoCapitalize="off" disabled={working}
+      onChange={event => { setJson(event.target.value); setChecked(false); setFailure(''); setImported(undefined) }} /></Field>
+    <button type="button" className="secondary" disabled={working || !json.trim()} onClick={() => {
+      setChecked(true)
+      setImported(undefined)
+      setFailure('')
+    }}>Проверить меню</button>
+    {(invalid || failure) && <p role="alert" className="admin-error">{invalid || failure}</p>}
+    {result && <div className="admin-import-result">
+      {imported && <p className="admin-success" role="status"><Check size={17} />Меню импортировано</p>}
+      <p className="admin-hint">Проверка перед импортом</p>
+      <Metrics items={[
+        { label: 'Категории', value: result.categoryCount },
+        { label: 'Товары', value: result.productCount },
+        { label: 'Пропущено', value: result.skippedCount },
+      ]} />
+      {result.warnings.length > 0 && <ul className="admin-import-warnings">{result.warnings.map((warning, index) =>
+        <li key={index}>{warning}</li>)}</ul>}
+      {!imported && <button type="button" className="primary" disabled={working || (!result.categoryCount && !result.productCount)}
+        onClick={() => void submitImport()}>{working ? 'Импорт…' : 'Импортировать'}</button>}
+    </div>}
+  </div>
 }
 
 function ProductForm({ state, product, execute }: { state: State; product?: Product; execute: Props['execute'] }) {
@@ -404,16 +467,22 @@ function TableForm({ table, state, execute }: { table?: Table; state: State; exe
   </Form>
 }
 
-function Staff({ state, open }: { state: State; open: (dialog: Dialog) => void }) {
+function Staff({ state, onlineUserIds, open }: {
+  state: State; onlineUserIds: Props['onlineUserIds']; open: (dialog: Dialog) => void
+}) {
   const [query, setQuery] = useState('')
-  const users = entries(state.users).filter(user => user.name.toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru')))
-    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
+  const isOnline = (user: User) => user.active && onlineUserIds.has(user.id)
+  const employees = entries(state.users)
+  const users = employees.filter(user => user.name.toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru')))
+    .sort((a, b) => Number(isOnline(b)) - Number(isOnline(a)) || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'ru'))
   return <>
+    <p className="admin-staff-summary">Сейчас в сети <strong>{employees.filter(isOnline).length}</strong></p>
     <label className="admin-search"><Search size={18} /><input type="search" value={query} placeholder="Поиск сотрудников"
       onChange={event => setQuery(event.target.value)} aria-label="Поиск сотрудников" /></label>
     <div className="admin-panel">
       {users.map(user => <ActionRow key={user.id} icon={<span className="admin-avatar">{user.name[0]?.toUpperCase()}</span>}
         label={user.name} detail={user.active ? user.role === 'admin' ? 'Администратор' : 'Официант' : 'Деактивирован'}
+        trailing={<span className={`admin-presence ${isOnline(user) ? 'admin-presence-online' : ''}`}>{isOnline(user) ? 'В сети' : 'Не в сети'}</span>}
         onClick={() => open({ kind: 'staff', id: user.id })} />)}
       {!users.length && <Empty>Сотрудники не найдены</Empty>}
     </div>
@@ -713,7 +782,7 @@ function ConfirmClear({ execute }: { execute: Props['execute'] }) {
   </>
 }
 
-export default function Admin({ state, user, execute, openOrder, onLogout, connection, mode }: Props) {
+export default function Admin({ state, user, execute, openOrder, onLogout, connection, mode, onlineUserIds }: Props) {
   const [page, setPage] = useState<Page>('overview')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -735,7 +804,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
   const employee = dialog?.kind === 'staff' ? state.users[dialog.id] : undefined
   const order = dialog?.kind === 'order' ? state.orders[dialog.id] : undefined
   const modalTitle = dialog && ({
-    product: 'Товар', category: 'Категория', hall: 'Зал', table: 'Стол',
+    product: 'Товар', import: 'Импорт меню', category: 'Категория', hall: 'Зал', table: 'Стол',
     staff: employee?.name ?? 'Сотрудник', order: order ? orderTitle(order) : 'Заказ',
     clear: 'Удалить тестовые данные?',
   }[dialog.kind])
@@ -754,7 +823,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'overview' && <Overview state={state} open={setDialog} navigate={navigate} />}
         {page === 'catalog' && <Catalog state={state} open={setDialog} />}
         {page === 'floor' && <Floor state={state} open={setDialog} />}
-        {page === 'staff' && <Staff state={state} open={setDialog} />}
+        {page === 'staff' && <Staff state={state} onlineUserIds={onlineUserIds} open={setDialog} />}
         {page === 'orders' && <Orders state={state} open={setDialog} />}
         {page === 'audit' && <Audit state={state} />}
         {page === 'settings' && <SystemSettings settings={state.settings} execute={execute} mode={mode} confirmClear={() => setDialog({ kind: 'clear' })} />}
@@ -774,6 +843,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
     </nav>
     {dialog && modalTitle && <Modal key={`${dialog.kind}-${'id' in dialog ? dialog.id : ''}`} title={modalTitle} onClose={() => setDialog(null)}>
       {dialog.kind === 'product' && <ProductForm state={state} product={dialog.value} execute={save} />}
+      {dialog.kind === 'import' && <MenuImport state={state} execute={execute} />}
       {dialog.kind === 'category' && <CategoryForm state={state} category={dialog.value} execute={save} />}
       {dialog.kind === 'hall' && <HallForm hall={dialog.value} execute={save} />}
       {dialog.kind === 'table' && <TableForm table={dialog.value} state={state} execute={save} />}

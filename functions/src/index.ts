@@ -54,10 +54,17 @@ export const coffeemanCommand = onCall({ region: 'us-central1', timeoutSeconds: 
     throw new HttpsError('permission-denied', 'Для аккаунта не назначен доступ к COFFEEMAN')
   }
   const { deviceId, operationId, command } = request.data ?? {}
+  const menuImport = command?.type === 'importMenu'
+  if (menuImport && role !== 'admin') throw new HttpsError('permission-denied', 'Импорт меню доступен администратору')
+  // The import parser validates the inner JSON and its fields inside the authorized transaction.
+  const validPayload = menuImport
+    ? request.rawRequest.rawBody.length <= 250000 && Object.keys(command).length === 2 &&
+      Object.hasOwn(command, 'json') && typeof command.json === 'string'
+    : request.rawRequest.rawBody.length <= 17000 && safeTree(command)
   if (typeof deviceId !== 'string' || !safeId.test(deviceId) || unsafeKeys.has(deviceId) ||
       typeof operationId !== 'string' || !safeEntityId.test(operationId) || operationId in Object.prototype ||
       !command || Array.isArray(command) || typeof command.type !== 'string' ||
-      request.rawRequest.rawBody.length > 17000 || !safeTree(command)) {
+      !validPayload) {
     throw new HttpsError('invalid-argument', 'Некорректные данные операции')
   }
 

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { emptyState, entries, orderAlerts, orderTitle } from './domain'
 import type { Command, Session } from './domain'
+import { useInstallGuide } from './InstallGuide'
 import { Orders } from './Orders'
 import type { OrdersScreen } from './Orders'
 import { store } from './store'
@@ -43,13 +44,26 @@ function Loading() {
   return <div className="loading-page" role="status"><LoaderCircle className="spinning" size={25} /><small>Загрузка COFFEEMAN</small></div>
 }
 
-function Login({ onLogin, startupError }: {onLogin: (session: Session) => void; startupError: string}) {
+function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session) => void; startupError: string; onInstall?: () => void}) {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(startupError)
+  const [compact, setCompact] = useState(false)
   const demo = store.mode === 'demo'
+
+  useEffect(() => {
+    const viewport = window.visualViewport
+    const resize = () => setCompact((viewport?.height ?? window.innerHeight) < 520)
+    viewport?.addEventListener('resize', resize)
+    window.addEventListener('resize', resize)
+    resize()
+    return () => {
+      viewport?.removeEventListener('resize', resize)
+      window.removeEventListener('resize', resize)
+    }
+  }, [])
   const enter = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -62,7 +76,7 @@ function Login({ onLogin, startupError }: {onLogin: (session: Session) => void; 
       setPending(false)
     }
   }
-  return <main className="login-page">
+  return <main className="login-page" data-compact={compact}>
     <div className="login-content">
       <header className="login-brand">
         <img src={import.meta.env.BASE_URL + 'mark.svg'} alt="" width={88} height={88} />
@@ -81,7 +95,8 @@ function Login({ onLogin, startupError }: {onLogin: (session: Session) => void; 
     </div>
     <div className="login-footer">
       <Toggle text="Запомнить меня" detail="На этом устройстве" value={remember} onChange={setRemember} />
-      {demo && <p className="mode-note">Деморежим · Вход как Паша или admin</p>}
+      {demo && <p className="mode-note">Деморежим · Вход по имени, admin для управления</p>}
+      {onInstall && <button type="button" className="login-install-link" onClick={onInstall}>Как установить приложение</button>}
     </div>
   </main>
 }
@@ -90,6 +105,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [state, setState] = useState(emptyState)
   const [loading, setLoading] = useState(true)
+  const {dialog: installDialog, openGuide} = useInstallGuide(!loading)
+  const [onlineUsers, setOnlineUsers] = useState<ReadonlySet<string>>(() => new Set())
   const [error, setError] = useState('')
   const [network, setNetwork] = useState<Connection>(store.mode === 'demo' ? 'demo' : 'connecting')
   const connected = network === 'online' || network === 'demo'
@@ -109,6 +126,7 @@ export default function App() {
   const runRestore = useRef<ReturnType<typeof store.restore> | undefined>(undefined)
   const admin = session?.role === 'admin'
   const active = session && state.users[session.userId]
+  const deactivated = active?.active === false
   const demo = store.mode === 'demo'
 
   useEffect(() => {
@@ -123,6 +141,14 @@ export default function App() {
   }, [])
 
   useEffect(() => store.subscribeConnection(setNetwork), [])
+  useEffect(() => {
+    if (!session || deactivated) {
+      setOnlineUsers(new Set())
+      return
+    }
+    return store.subscribePresence(setOnlineUsers, err => setToast(err.message))
+  }, [session, deactivated])
+
   useEffect(() => {
     if (!session) return
     return store.subscribe(next => {
@@ -243,14 +269,14 @@ export default function App() {
   const openNotifications = () => { setSeen(Date.now()); setModal('notifications') }
 
   if (loading) return <Loading />
-  if (!session) return <Login startupError={error} onLogin={value => {
+  if (!session) return <><Login startupError={error} onInstall={openGuide} onLogin={value => {
     setSeen(Date.now())
     setSession(value)
     setPreferences(loadPreferences(value.userId))
     navigate({page: 'home'}, true)
-  }} />
+  }} />{installDialog}</>
 
-  if (active?.active === false) return <main className="main-page app-shell"><h1>Доступ приостановлен</h1><p className="sheet-note">Обратитесь к администратору заведения.</p><button className="secondary" onClick={() => void logout()}>Выйти</button></main>
+  if (deactivated) return <main className="main-page app-shell"><h1>Доступ приостановлен</h1><p className="sheet-note">Обратитесь к администратору заведения.</p><button className="secondary" onClick={() => void logout()}>Выйти</button></main>
 
   const tab = tabs.find(item => item.page === screen.page)?.page as Tab | undefined
   const withNav = !admin && !!tab
@@ -259,7 +285,7 @@ export default function App() {
   return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`} onPointerDown={preferences.sound ? unlockSound : undefined}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
-      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} mode={store.mode} /></Suspense>
+      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} mode={store.mode} onlineUserIds={onlineUsers} /></Suspense>
     </div> :
       <>
         {screen.page === 'home' && <Home state={state} user={session} now={now} connection={connection} connected={connected}
@@ -268,7 +294,7 @@ export default function App() {
         {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
         {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
           navigate={view => navigate({page: 'profile', view})} preferences={preferences} setPreference={updatePreference}
-          connection={connection} period={period} setPeriod={setPeriod} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
+          connection={connection} period={period} setPeriod={setPeriod} onInstall={openGuide} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
       </>}
     {(!admin || showOrders) && <div hidden={!showOrders}>
       <Orders state={state} user={session} execute={execute} screen={orderView ? screen : {page: 'orders'}} navigate={orderNavigate} openQuick={() => setModal('quick')} />
@@ -299,6 +325,7 @@ export default function App() {
         {alerts.length + visibleNotices.length === 0 && <Empty icon={<Bell size={22} />} title="Уведомлений нет" />}
       </div>
     </Sheet>}
+    {installDialog}
     {toast && !modal && <div className="toast" role="status"><span>{toast}</span><IconButton label="Закрыть уведомление" onClick={() => setToast('')}><X size={16} /></IconButton></div>}
   </div>
 }

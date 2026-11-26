@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { addProduct, chooseLatteModifiers, configureProduct, createTableOrder, itemAction, openCatalog, signIn, tab } from './flows'
+import { addProduct, chooseLatteModifiers, configureProduct, createTableOrder, itemAction, openCatalog, openLogin, signIn, tab } from './flows'
 
 async function signOut(page: Page) {
   await tab(page, 'Профиль')
@@ -8,9 +8,9 @@ async function signOut(page: Page) {
 }
 
 test('сессия, оперативная панель, настройки, клавиатура и выход', async ({ page }) => {
-  await page.goto('/')
+  await openLogin(page)
   const name = page.getByLabel('Имя сотрудника')
-  await name.focus()
+  await name.click()
   await expect(name).toBeFocused()
   expect(Number.parseFloat(await name.evaluate(input => getComputedStyle(input).fontSize))).toBeGreaterThanOrEqual(16)
   const viewport = await page.locator('meta[name="viewport"]').getAttribute('content')

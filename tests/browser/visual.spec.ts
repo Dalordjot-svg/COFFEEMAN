@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { chooseLatteModifiers, chooseTable, configureProduct, openCatalog, signIn, tab } from './flows'
+import { chooseLatteModifiers, chooseTable, configureProduct, openCatalog, openLogin, signIn, tab } from './flows'
 
 const sizes = [
   { width: 375, height: 812 },
@@ -40,7 +40,7 @@ for (const size of sizes) {
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
 
-    await page.goto('/')
+    await openLogin(page)
     await expect(page.getByLabel('Имя сотрудника')).toBeVisible()
     await save(page, '01-login')
     await page.getByLabel('Имя сотрудника').fill('Паша')

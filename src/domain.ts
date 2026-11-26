@@ -1,3 +1,5 @@
+import { buildMenuImport, MenuImportError } from './menu-import'
+
 export type Role = 'waiter' | 'admin'
 export type Session = { userId: string; deviceId: string; role: Role; name: string; demo?: boolean }
 export type User = { id: string; name: string; role: Role; active: boolean; createdAt: number; lastSeenAt: number }
@@ -66,6 +68,7 @@ export type Command =
   | { type: 'updateUser'; userId: string; name?: string; active?: boolean }
   | { type: 'assignOrder'; orderId: string; waiterId: string }
   | { type: 'saveSettings'; settings: Settings }
+  | { type: 'importMenu'; json: string }
   | { type: 'clearDemo' | 'seedDemo' }
 
 type Stamp = { id: string; now: number }
@@ -457,7 +460,8 @@ function saveInventory(state: State, productId: string, input: InventoryInput, s
   requireCondition(quantity === null || quantity >= reserved, `В заказах зарезервировано ${reserved} порций. Укажите остаток не меньше резерва`)
   state.inventory[productId] = { quantity, ...(min === undefined ? {} : { min }), updatedAt: stamp.now, revision: revision + 1 }
   if ((current?.quantity ?? null) !== quantity) {
-    state.inventoryTransactions[stamp.id] = { id: stamp.id, operationId: stamp.id, productId, type: 'adjust',
+    const id = eventKey('adjust', stamp.id, productId)
+    state.inventoryTransactions[id] = { id, operationId: stamp.id, productId, type: 'adjust',
       quantity: (quantity ?? 0) - (current?.quantity ?? 0), at: stamp.now }
   }
 }
@@ -536,8 +540,16 @@ function stockUpdates(before: State, after: State, stamp: Stamp, ids: Set<string
 }
 
 const adminCommands: ReadonlySet<Command['type']> = new Set([
-  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'clearDemo', 'seedDemo',
+  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearDemo', 'seedDemo',
 ])
+
+function importEntityId(record: Record<string, unknown>, operationId: string, position: number) {
+  const base = `menu-${operationId.slice(0, 130)}-${position + 1}`
+  let id = base
+  let collision = 0
+  while (Object.hasOwn(record, id)) id = `${base}-${++collision}`
+  return id
+}
 
 export function applyCommand(previous: State, session: Session, command: Command, stamp: Stamp): State {
   checkId(stamp.id)
@@ -884,6 +896,33 @@ export function applyCommand(previous: State, session: Session, command: Command
         venueName: checkText(settings.venueName, 'название заведения', 100), waitMinutes, prepMinutes, readyMinutes, criticalMinutes,
         defaultMin: checkNumber(settings.defaultMin, 0, 1_000_000, 'минимальный остаток'),
       }
+      break
+    }
+    case 'importMenu': {
+      let plan: ReturnType<typeof buildMenuImport>
+      try {
+        plan = buildMenuImport(state, command.json)
+      } catch (error) {
+        if (error instanceof MenuImportError) throw new DomainError(error.message)
+        throw error
+      }
+      const nextSort = (rows: { sort: number }[]) => rows.reduce((last, entity) => Math.max(last, entity.sort), -1) + 1
+      const categorySort = nextSort(entries(state.categories))
+      plan.categories.forEach(({ key, name, color }, index) => {
+        const id = importEntityId(state.categories, stamp.id, index)
+        state.categories[id] = { id, name, color, sort: Math.min(99_999, categorySort + index) }
+        plan.categoryIds.set(key, id)
+      })
+      const productSort = nextSort(entries(state.products))
+      plan.products.forEach(({ categoryKey, inventory, ...product }, index) => {
+        const categoryId = plan.categoryIds.get(categoryKey)
+        requireCondition(categoryId, 'Категория импортируемого товара недоступна')
+        const id = importEntityId(state.products, stamp.id, index)
+        state.products[id] = { id, categoryId, sort: Math.min(99_999, productSort + index), ...product }
+        if (inventory) saveInventory(state, id, inventory, stamp)
+      })
+      const { categoryCount, productCount, skippedCount } = plan.preview
+      detail = `Категорий добавлено: ${categoryCount}. Товаров добавлено: ${productCount}. Пропущено: ${skippedCount}`
       break
     }
     case 'clearDemo': {

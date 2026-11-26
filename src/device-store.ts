@@ -1,6 +1,9 @@
 import { newId } from './domain'
 import type { Connection } from './store'
 
+export const presencePulseMs = 25_000
+export const presenceExpiryMs = 90_000
+
 export function asError(error: unknown) {
   return error instanceof Error ? error : new Error('Не удалось выполнить операцию')
 }
