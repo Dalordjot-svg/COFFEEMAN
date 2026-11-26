@@ -11,7 +11,7 @@ export type PriceOption = { id: string; name: string; price: number }
 export type Modifier = { id: string; name: string; required?: boolean; multiple?: boolean; options: PriceOption[] }
 export type Product = {
   id: string; name: string; categoryId: string; price: number; available: boolean; sort: number
-  description?: string; imageUrl?: string; volume?: string; sizes?: PriceOption[]; modifierIds?: string[]; archived?: boolean
+  cost?: number; description?: string; imageUrl?: string; volume?: string; sizes?: PriceOption[]; modifierIds?: string[]; archived?: boolean
 }
 export type Inventory = { quantity: number | null; min?: number; updatedAt: number; revision?: number }
 type InventoryInput = { quantity: number | null; min?: number; expectedRevision?: number }
@@ -23,7 +23,7 @@ export type InventoryTransaction = {
 export type ItemStatus = 'draft' | 'preparing' | 'ready' | 'served' | 'canceled'
 export type OrderItem = {
   id: string; guestId: string; productId: string; name: string; quantity: number; unitPrice: number
-  sizeId?: string; sizeName?: string; optionIds: string[]; options: { name: string; price: number }[]
+  unitCost?: number; sizeId?: string; sizeName?: string; optionIds: string[]; options: { name: string; price: number }[]
   comment?: string; status: ItemStatus; createdAt: number; sentAt?: number; readyAt?: number; servedAt?: number; canceledAt?: number
 }
 export type Order = {
@@ -35,6 +35,7 @@ export type Audit = { id: string; actorId: string; deviceId: string; type: Comma
 export type Settings = { venueName: string; waitMinutes: number; criticalMinutes: number; prepMinutes: number; readyMinutes: number; defaultMin: number }
 export type State = {
   schemaVersion: 1
+  sampleDataRemoved?: true
   users: Record<string, User>
   devices: Record<string, Device>
   categories: Record<string, Category>
@@ -69,7 +70,6 @@ export type Command =
   | { type: 'assignOrder'; orderId: string; waiterId: string }
   | { type: 'saveSettings'; settings: Settings }
   | { type: 'importMenu'; json: string }
-  | { type: 'clearDemo' | 'seedDemo' }
 
 type Stamp = { id: string; now: number }
 type Candidate = Record<string, unknown>
@@ -138,6 +138,7 @@ export function normalizeState(raw: unknown): State {
   if (raw.schemaVersion && raw.schemaVersion !== result.schemaVersion) {
     throw new DomainError('Версия данных не поддерживается этим приложением')
   }
+  if (raw.sampleDataRemoved === true) result.sampleDataRemoved = true
   result.users = records<User>(raw.users, row => namedId(row) && numeric(row.createdAt) && (row.role === 'admin' || row.role === 'waiter'))
   result.devices = records<Device>(raw.devices, row => safeKey(row.id) && safeKey(row.userId))
   result.categories = records<Category>(raw.categories, namedId)
@@ -257,6 +258,8 @@ export function stats(state: State, period: Period, userId?: string, now = Date.
       label: period === 'week' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][index] : String(index + 1), value: 0,
     }))
   let saleCents = 0
+  let costCents = 0
+  let missingCosts = false
   let active = 0
   let orders = 0
   let guests = 0
@@ -270,9 +273,13 @@ export function stats(state: State, period: Period, userId?: string, now = Date.
     const index = period === 'day' ? closed.getHours() : period === 'week' ? (closed.getDay() + 6) % 7 : closed.getDate() - 1
     const amount = cents(orderTotal(order))
     saleCents += amount
+    for (const item of orderItems(order)) {
+      if (numeric(item.unitCost) && item.unitCost >= 0) costCents += cents(item.unitCost) * item.quantity
+      else missingCosts = true
+    }
     series[index].value += amount
   }
-  return { sales: saleCents / 100, orders, active, guests, average: orders ? Math.round(saleCents / orders) / 100 : 0,
+  return { sales: saleCents / 100, grossProfit: missingCosts ? null : (saleCents - costCents) / 100, orders, active, guests, average: orders ? Math.round(saleCents / orders) / 100 : 0,
     series: series.map(point => ({ ...point, value: point.value / 100 })) }
 }
 
@@ -540,7 +547,7 @@ function stockUpdates(before: State, after: State, stamp: Stamp, ids: Set<string
 }
 
 const adminCommands: ReadonlySet<Command['type']> = new Set([
-  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearDemo', 'seedDemo',
+  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu',
 ])
 
 function importEntityId(record: Record<string, unknown>, operationId: string, position: number) {
@@ -714,6 +721,8 @@ export function applyCommand(previous: State, session: Session, command: Command
       for (const item of draft) {
         inventoryMovement(state, stamp, order, item, 'reserve')
         inventoryIds.add(item.productId)
+        const cost = state.products[item.productId]?.cost
+        if (cost !== undefined) item.unitCost = cost
         item.status = 'preparing'
         item.sentAt = stamp.now
       }
@@ -800,6 +809,7 @@ export function applyCommand(previous: State, session: Session, command: Command
         name: checkText(incoming.name, 'название', 120),
         categoryId: incoming.categoryId,
         price: checkPrice(incoming.price),
+        ...(incoming.cost === undefined ? {} : { cost: checkPrice(incoming.cost) }),
         available: existing && command.preserveAvailability === true ? existing.available : checkFlag(incoming.available, 'доступность'),
         archived: incoming.archived === undefined ? false : checkFlag(incoming.archived, 'архив'),
         sort: checkNumber(incoming.sort, 0, 99_999, 'порядок отображения'),
@@ -925,16 +935,6 @@ export function applyCommand(previous: State, session: Session, command: Command
       detail = `Категорий добавлено: ${categoryCount}. Товаров добавлено: ${productCount}. Пропущено: ${skippedCount}`
       break
     }
-    case 'clearDemo': {
-      requireCondition(session.demo === true, 'Операция доступна только в деморежиме')
-      state = { ...emptyState(), users: state.users, devices: state.devices, settings: state.settings }
-      break
-    }
-    case 'seedDemo': {
-      requireCondition(session.demo === true, 'Операция доступна только в деморежиме')
-      mergeDemo(state, stamp.now)
-      break
-    }
     default:
       throw new DomainError('Неизвестная операция')
   }
@@ -948,29 +948,81 @@ export function applyCommand(previous: State, session: Session, command: Command
   return state
 }
 
-function mergeDemo(state: State, now: number) {
-  const demo = createDemoState(now)
-  state.users = { ...demo.users, ...state.users }
-  state.categories = { ...demo.categories, ...state.categories }
-  state.products = { ...demo.products, ...state.products }
-  state.modifiers = { ...demo.modifiers, ...state.modifiers }
-  state.halls = { ...demo.halls, ...state.halls }
-  state.tables = { ...demo.tables, ...state.tables }
-  state.inventory = { ...demo.inventory, ...state.inventory }
-  for (const order of entries(demo.orders)) {
-    if (state.orders[order.id] || (order.tableId && isActiveOrder(order) && entries(state.orders).some(existing =>
-      existing.tableId === order.tableId && isActiveOrder(existing)))) continue
-    const reservations = entries(demo.inventoryReservations).filter(row => row.orderId === order.id)
-    const counts = new Map<string, number>()
-    for (const row of reservations) counts.set(row.productId, (counts.get(row.productId) ?? 0) + row.quantity)
-    const feasible = [...counts].every(([id, count]) => {
-      const available = availableQuantity(state, id)
-      return available === null || available >= count
-    })
-    if (!feasible) continue
-    state.orders[order.id] = order
-    for (const row of reservations) state.inventoryReservations[row.id] = row
+export function removeSampleData(state: State): State {
+  if (state.sampleDataRemoved) return state
+  const next = normalizeState(state)
+  const sample = normalizeState(createDemoState(new Date(2026, 0, 2, 12).getTime()))
+  const removed = new Set<string>()
+  for (const order of entries(sample.orders)) {
+    const current = next.orders[order.id]
+    if (!current) continue
+    for (const item of entries(order.items)) {
+      if (current.items[item.id]?.productId === item.productId) delete current.items[item.id]
+    }
+    if (entries(current.items).length === 0) {
+      delete next.orders[order.id]
+      removed.add(order.id)
+    }
   }
+  for (const [id, row] of Object.entries(next.inventoryReservations)) {
+    if (sample.orders[row.orderId] && !next.orders[row.orderId]?.items[row.itemId]) delete next.inventoryReservations[id]
+  }
+  for (const [id, row] of Object.entries(next.inventoryTransactions)) {
+    if (row.orderId && sample.orders[row.orderId] && (removed.has(row.orderId) ||
+        (row.itemId && !next.orders[row.orderId]?.items[row.itemId]))) delete next.inventoryTransactions[id]
+  }
+  for (const [id, log] of Object.entries(next.auditLogs)) {
+    if (log.orderId && removed.has(log.orderId)) delete next.auditLogs[id]
+  }
+  for (const [id, notice] of Object.entries(next.notifications)) {
+    if (id in sample.notifications || (notice.orderId && removed.has(notice.orderId))) delete next.notifications[id]
+  }
+
+  const workOrders = entries(next.orders)
+  for (const original of entries(sample.products)) {
+    const product = next.products[original.id]
+    if (!product) continue
+    const same = product.name === original.name && product.categoryId === original.categoryId &&
+      product.price === original.price && product.cost === undefined && product.description === original.description &&
+      product.volume === original.volume && product.imageUrl === original.imageUrl &&
+      JSON.stringify(product.sizes) === JSON.stringify(original.sizes) &&
+      JSON.stringify(product.modifierIds) === JSON.stringify(original.modifierIds)
+    if (!same) continue
+    if (entries(next.inventoryReservations).some(reservation => reservation.productId === product.id)) {
+      next.products[product.id] = { ...product, archived: true, available: false }
+    } else {
+      delete next.products[product.id]
+      delete next.inventory[product.id]
+    }
+  }
+  for (const [id, event] of Object.entries(next.notifications)) {
+    if (event.productId && sample.products[event.productId] && !next.products[event.productId]) delete next.notifications[id]
+  }
+
+  for (const row of entries(sample.categories)) {
+    if (next.categories[row.id]?.name === row.name && !entries(next.products).some(product => product.categoryId === row.id)) {
+      delete next.categories[row.id]
+    }
+  }
+  for (const row of entries(sample.modifiers)) {
+    if (!entries(next.products).some(product => product.modifierIds?.includes(row.id))) delete next.modifiers[row.id]
+  }
+  for (const row of entries(sample.tables)) {
+    const table = next.tables[row.id]
+    if (table?.name === row.name && table.capacity === row.capacity && table.waiterId === row.waiterId &&
+        table.hallId === row.hallId && table.sort === row.sort && !workOrders.some(order => order.tableId === row.id)) delete next.tables[row.id]
+  }
+  for (const row of entries(sample.halls)) {
+    if (next.halls[row.id]?.name === row.name && !entries(next.tables).some(table => table.hallId === row.id)) delete next.halls[row.id]
+  }
+  for (const row of entries(sample.users)) {
+    if (next.users[row.id]?.name === row.name && !entries(next.devices).some(device => device.userId === row.id) &&
+        !entries(next.tables).some(table => table.waiterId === row.id) && !workOrders.some(order => order.waiterId === row.id)) {
+      delete next.users[row.id]
+    }
+  }
+  next.sampleDataRemoved = true
+  return next
 }
 
 export function createDemoState(now = Date.now()): State {

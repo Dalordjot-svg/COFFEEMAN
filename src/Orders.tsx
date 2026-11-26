@@ -493,6 +493,8 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   const drafts = items.filter((item) => item.status === 'draft');
   const ready = items.filter((item) => item.status === 'ready');
   const allServed = items.length > 0 && items.every((item) => item.status === 'served');
+  const unsent = items.every(item => item.status === 'draft');
+  const cancelLabel = unsent ? 'Удалить заказ' : 'Отменить заказ';
   const hasGuests = order.guestIds.length > 0;
   const catalog = (guestId: string) => navigate({ page: 'catalog', guestId, orderId: order.id, from });
   const closeMenu = () => { setMenu(null); setSelectedItem(null); mutation.clearError(); };
@@ -501,10 +503,8 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   if (editable) {
     if (drafts.length) {
       action = { label: 'Отправить на кухню', execute: () => { void mutation.perform({ type: 'sendOrder', orderId: order.id }); }, icon: <Send size={18} /> };
-    } else if (allServed && order.precheckAt) {
-      action = { label: 'Завершить обслуживание', execute: () => { void mutation.perform({ type: 'closeOrder', orderId: order.id }); }, icon: <Check size={19} /> };
     } else if (allServed) {
-      action = { label: 'Запросить пречек', execute: () => { void mutation.perform({ type: 'precheckOrder', orderId: order.id }); }, icon: <Receipt size={19} /> };
+      action = { label: 'Завершить обслуживание', execute: () => { void mutation.perform({ type: 'closeOrder', orderId: order.id }); }, icon: <Check size={19} /> };
     } else if (hasGuests && !order.precheckAt) {
       action = { label: items.length ? 'Добавить дозаказ' : 'Добавить позиции', execute: () => catalog(order.guestIds[0]), icon: <Plus size={21} /> };
     }
@@ -562,6 +562,8 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       <div className="order-bottom order-editor-bottom">
         {!selected && !menu && <FormError text={mutation.error} />}
         <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
+        {editable && allServed && !order.precheckAt && <button type="button" className="secondary" disabled={mutation.busy}
+          onClick={() => { void mutation.perform({ type: 'precheckOrder', orderId: order.id }); }}><Receipt size={18} />Запросить пречек</button>}
         {action && <button type="button" className="primary" disabled={mutation.busy} onClick={action.execute}>{action.icon}{action.label}</button>}
       </div>
       {selected && <OrderSheet title={selected.name} locked={mutation.busy} onClose={closeMenu}>
@@ -592,13 +594,13 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
             {editable && (selected.status === 'draft' || selected.status === 'preparing' || selected.status === 'ready') && <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={() => { void itemAction('cancelItem', selected.id); }}><Ban size={17} />{selected.status === 'draft' ? 'Удалить позицию' : 'Отменить позицию'}</button>}
           </div>}
       </OrderSheet>}
-      {menu && <OrderSheet title={menu === 'cancel' ? 'Отменить заказ?' : 'Действия заказа'} onClose={closeMenu} locked={mutation.busy}>
+      {menu && <OrderSheet title={menu === 'cancel' ? cancelLabel + '?' : 'Действия заказа'} onClose={closeMenu} locked={mutation.busy}>
         {menu === 'cancel' ? <div className="order-sheet-content">
-          <p className="order-sheet-caption">Невыданные позиции будут отменены, зарезервированный остаток освободится.</p>
+          <p className="order-sheet-caption">{unsent ? 'Черновик будет удалён из активных заказов.' : 'Невыданные позиции будут отменены, зарезервированный остаток освободится.'}</p>
           <FormError text={mutation.error} />
           <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={async () => {
             if (await mutation.perform({ type: 'cancelOrder', orderId: order.id })) navigate({ page: from ?? 'orders' });
-          }}>Отменить заказ</button>
+          }}>{cancelLabel}</button>
           <button type="button" className="secondary" onClick={closeMenu}>Продолжить обслуживание</button>
         </div> : <div className="order-sheet-list">
           <div className="order-menu-info"><Clock3 size={18} />Создан в {compactTime.format(order.createdAt)}</div>
@@ -608,7 +610,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
           {editable && order.precheckAt && <button type="button" className="order-sheet-row" disabled={mutation.busy} onClick={async () => {
             if (await mutation.perform({ type: 'reopenOrder', orderId: order.id })) closeMenu();
           }}><ArrowUpRight size={19} />Возобновить обслуживание</button>}
-          {editable && !items.some((item) => item.status === 'served') && <button type="button" className="order-sheet-row order-danger" onClick={() => setMenu('cancel')}><Ban size={19} />Отменить заказ</button>}
+          {editable && !items.some((item) => item.status === 'served') && <button type="button" className="order-sheet-row order-danger" onClick={() => setMenu('cancel')}><Ban size={19} />{cancelLabel}</button>}
           <FormError text={mutation.error} />
         </div>}
       </OrderSheet>}

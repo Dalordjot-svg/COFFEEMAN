@@ -35,7 +35,7 @@
 
 ```sh
 npm ci
-npm run build
+VITE_TEST_FIXTURES=1 npm run build
 QA_PREVIEW=1 VISUAL_CHECK=1 npm run test:e2e -- --project=chromium-mobile
 ```
 

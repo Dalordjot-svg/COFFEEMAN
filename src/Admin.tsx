@@ -1,7 +1,7 @@
 import { cloneElement, useEffect, useId, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import {
   Activity, Archive, ArrowLeft, Check, ChevronRight,
-  ClipboardList, Coffee, Database, Download, History, Image as ImageIcon, LayoutGrid,
+  ClipboardList, Coffee, Download, History, Image as ImageIcon, LayoutGrid,
   ListFilter, LogOut, Menu, Package, Plus, Search, Settings as SettingsIcon, Upload,
   Sofa, Tag, UsersRound, X,
 } from 'lucide-react'
@@ -22,7 +22,6 @@ type Props = {
   openOrder: (id: string) => void
   onLogout: () => void
   connection: string
-  mode: 'demo' | 'firebase'
   onlineUserIds: ReadonlySet<string>
 }
 
@@ -38,7 +37,6 @@ type Dialog =
   | { kind: 'table'; value?: Table }
   | { kind: 'staff'; id: string }
   | { kind: 'order'; id: string }
-  | { kind: 'clear' }
 
 const titles: Record<Page, string> = {
   overview: 'Управление',
@@ -94,8 +92,6 @@ const auditNames: Record<string, string> = {
   closeOrder: 'Завершение заказа',
   reopenOrder: 'Возобновление заказа',
   saveSettings: 'Изменение настроек',
-  seedDemo: 'Загрузка тестовых данных',
-  clearDemo: 'Удаление тестовых данных',
   updateInventory: 'Изменение остатка',
 }
 
@@ -326,6 +322,7 @@ function ProductForm({ state, product, execute }: { state: State; product?: Prod
       product: {
         id: product?.id ?? newId(),
         name: fieldText(data, 'name'), categoryId: fieldText(data, 'categoryId'), price: fieldNumber(data, 'price'),
+        ...(fieldText(data, 'cost') === '' ? {} : {cost: fieldNumber(data, 'cost')}),
         description: fieldText(data, 'description'), imageUrl: fieldText(data, 'imageUrl'), volume: fieldText(data, 'volume'),
         sort: fieldNumber(data, 'sort'),
         available: availability,
@@ -346,6 +343,7 @@ function ProductForm({ state, product, execute }: { state: State; product?: Prod
     {!categories.length && <p className="admin-hint">Сначала добавьте категорию в каталоге.</p>}
     <div className="admin-columns">
       <Field label="Цена, ₽"><input name="price" required type="number" inputMode="decimal" min={0} step="0.01" defaultValue={product?.price} /></Field>
+      <Field label="Себестоимость порции, ₽"><input name="cost" type="number" inputMode="decimal" min={0} step="0.01" defaultValue={product?.cost} /></Field>
       <Field label="Размер или объём"><input name="volume" maxLength={60} placeholder="250 мл" defaultValue={product?.volume} /></Field>
     </div>
     <Field label="Описание"><textarea name="description" maxLength={500} rows={2} defaultValue={product?.description} /></Field>
@@ -561,7 +559,8 @@ function Overview({ state, open, navigate }: { state: State; open: (dialog: Dial
       <div><strong>{state.settings.venueName}</strong><small>Административная панель</small></div>
     </div>
     <Metrics items={[
-      { label: 'Продажи сегодня', value: rubles.format(today.sales) },
+      { label: 'Выручка сегодня', value: rubles.format(today.sales) },
+      { label: 'Валовая прибыль сегодня', value: today.grossProfit === null ? 'Не указана себестоимость' : rubles.format(today.grossProfit) },
       { label: 'Средний чек', value: rubles.format(today.average) },
       { label: 'Активные заказы', value: today.active },
       { label: 'Завершённые заказы', value: orders.filter(order => order.closedAt !== undefined).length },
@@ -717,22 +716,8 @@ function OrderDetail({ state, order, execute, openOrder }: {
   </>
 }
 
-function SystemSettings({ settings, execute, mode, confirmClear }: {
-  settings: Settings; execute: Props['execute']; mode: Props['mode']; confirmClear: () => void
-}) {
+function SystemSettings({ settings, execute }: {settings: Settings; execute: Props['execute']}) {
   const [feedback, setFeedback] = useState('')
-  const [seedFailure, setSeedFailure] = useState('')
-  const [working, setWorking] = useState(false)
-  async function seed() {
-    setWorking(true)
-    setFeedback('')
-    setSeedFailure('')
-    try {
-      await execute({ type: 'seedDemo' })
-      setFeedback('Тестовые данные загружены')
-    } catch (error) { setSeedFailure(message(error)) }
-    finally { setWorking(false) }
-  }
   return <>
     <div className="admin-panel admin-panel-padding">
       <Form onSave={async data => {
@@ -757,32 +742,10 @@ function SystemSettings({ settings, execute, mode, confirmClear }: {
       </Form>
     </div>
     {feedback && <p className="admin-success" role="status"><Check size={17} />{feedback}</p>}
-    {mode === 'demo' && <section className="admin-panel">
-      <h2 className="admin-panel-heading">Тестовые данные</h2>
-      <button type="button" className="admin-row admin-action" disabled={working} onClick={() => void seed()}>
-        <span className="admin-row-icon"><Database size={18} /></span><span className="admin-row-copy"><strong>{working ? 'Загрузка…' : 'Загрузить тестовые данные'}</strong></span><ChevronRight size={17} />
-      </button>
-      <ActionRow icon={<Archive size={18} />} label="Удалить тестовые данные" onClick={confirmClear} danger />
-      {seedFailure && <p className="admin-error" role="alert">{seedFailure}</p>}
-    </section>}
   </>
 }
 
-function ConfirmClear({ execute }: { execute: Props['execute'] }) {
-  const [working, setWorking] = useState(false)
-  const [failure, setFailure] = useState('')
-  return <>
-    <p className="admin-clear-text">Тестовые заказы, каталог, залы, столы, остатки и журнал операций будут очищены.</p>
-    {failure && <p className="admin-error" role="alert">{failure}</p>}
-    <button type="button" className="admin-archive admin-clear" disabled={working} onClick={async () => {
-      setWorking(true)
-      try { await execute({ type: 'clearDemo' }) } catch (error) { setFailure(message(error)) }
-      finally { setWorking(false) }
-    }}>{working ? 'Удаление…' : 'Подтвердить удаление'}</button>
-  </>
-}
-
-export default function Admin({ state, user, execute, openOrder, onLogout, connection, mode, onlineUserIds }: Props) {
+export default function Admin({ state, user, execute, openOrder, onLogout, connection, onlineUserIds }: Props) {
   const [page, setPage] = useState<Page>('overview')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -806,7 +769,6 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
   const modalTitle = dialog && ({
     product: 'Товар', import: 'Импорт меню', category: 'Категория', hall: 'Зал', table: 'Стол',
     staff: employee?.name ?? 'Сотрудник', order: order ? orderTitle(order) : 'Заказ',
-    clear: 'Удалить тестовые данные?',
   }[dialog.kind])
 
   return <div className="admin-shell">
@@ -826,7 +788,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'staff' && <Staff state={state} onlineUserIds={onlineUserIds} open={setDialog} />}
         {page === 'orders' && <Orders state={state} open={setDialog} />}
         {page === 'audit' && <Audit state={state} />}
-        {page === 'settings' && <SystemSettings settings={state.settings} execute={execute} mode={mode} confirmClear={() => setDialog({ kind: 'clear' })} />}
+        {page === 'settings' && <SystemSettings settings={state.settings} execute={execute} />}
         {page === 'more' && <>
           <div className="admin-panel">
             <ActionRow icon={<ClipboardList size={19} />} label="Заказы" detail="Статусы и назначение официантов" onClick={() => navigate('orders')} />
@@ -850,7 +812,6 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
       {dialog.kind === 'staff' && employee && <StaffForm employee={employee} currentId={user.userId} state={state} execute={save}
         openOrder={id => setDialog({ kind: 'order', id })} />}
       {dialog.kind === 'order' && order && <OrderDetail order={order} state={state} execute={execute} openOrder={id => { setDialog(null); openOrder(id) }} />}
-      {dialog.kind === 'clear' && <ConfirmClear execute={save} />}
     </Modal>}
   </div>
 }

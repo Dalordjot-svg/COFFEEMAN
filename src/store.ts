@@ -1,5 +1,5 @@
 import {
-  applyCommand, createDemoState, newId, normalizeState,
+  applyCommand, createDemoState, emptyState, newId, normalizeState, removeSampleData,
 } from './domain'
 import type { Command, Session, State } from './domain'
 import { asError, browserValue, connectionSubscribe, deviceId, presenceExpiryMs, presencePulseMs } from './device-store'
@@ -111,7 +111,9 @@ function createDemoStore(): Store {
   const listeners = new Map<Listener, ErrorListener | undefined>()
 
   const initialize = () => {
-    ready ??= browserValue<State>(stateKey, (value) => value ?? createDemoState())
+    ready ??= browserValue<State>(stateKey, (value) => import.meta.env.VITE_TEST_FIXTURES === '1'
+      ? value ?? createDemoState()
+      : value ? removeSampleData(value) : { ...emptyState(), sampleDataRemoved: true })
       .catch((error) => {
         ready = undefined
         throw error

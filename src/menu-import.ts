@@ -4,7 +4,7 @@ type Row = Record<string, unknown>
 type MenuCategory = { name: string; key: string; color: string }
 type MenuProduct = {
   name: string; categoryKey: string; price: number; available: boolean
-  description?: string; volume?: string; imageUrl?: string; inventory?: { quantity: number | null; min?: number }
+  cost?: number; description?: string; volume?: string; imageUrl?: string; inventory?: { quantity: number | null; min?: number }
 }
 
 export type MenuImportPreview = { categoryCount: number; productCount: number; skippedCount: number; warnings: string[] }
@@ -128,13 +128,17 @@ export function buildMenuImport(state: State, text: string) {
   for (const [index, value] of source.products.entries()) {
     const label = `Товар №${index + 1}`
     const fields = row(value, label)
-    checkFields(fields, ['name', 'category', 'price', 'description', 'volume', 'imageUrl', 'quantity', 'min', 'available'], label)
+    checkFields(fields, ['name', 'category', 'price', 'cost', 'description', 'volume', 'imageUrl', 'quantity', 'min', 'available'], label)
     const name = string(fields.name, `${label}, name`, 120)
     const category = string(fields.category, `${label}, category`, 80)
     const categoryKey = nameKey(category)
     const price = fields.price
     if (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || price > 1_000_000) {
       throw new MenuImportError(`${label}: укажите числовую цену от 0 до 1 000 000 ₽`)
+    }
+    const cost = fields.cost
+    if (cost !== undefined && (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || cost > 1_000_000)) {
+      throw new MenuImportError(`${label}: укажите числовую себестоимость порции от 0 до 1 000 000 ₽`)
     }
     const description = string(fields.description, `${label}, description`, 1200, true)
     const volume = string(fields.volume, `${label}, volume`, 80, true)
@@ -160,6 +164,7 @@ export function buildMenuImport(state: State, text: string) {
     }
     products.push({
       name, categoryKey, price: Math.round(price * 100) / 100, available,
+      ...(cost === undefined ? {} : { cost: Math.round(cost * 100) / 100 }),
       ...(description ? { description } : {}), ...(volume ? { volume } : {}), ...(imageUrl ? { imageUrl } : {}),
       ...(fields.quantity !== undefined || min !== undefined ? { inventory: { quantity, ...(min !== undefined ? { min } : {}) } } : {}),
     })

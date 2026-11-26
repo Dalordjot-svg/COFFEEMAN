@@ -95,7 +95,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
     </div>
     <div className="login-footer">
       <Toggle text="Запомнить меня" detail="На этом устройстве" value={remember} onChange={setRemember} />
-      {demo && <p className="mode-note">Деморежим · Вход по имени, admin для управления</p>}
+      {demo && <p className="mode-note">Локальный режим · admin для управления</p>}
       {onInstall && <button type="button" className="login-install-link" onClick={onInstall}>Как установить приложение</button>}
     </div>
   </main>
@@ -264,7 +264,7 @@ export default function App() {
   }
   const execute = async (command: Command) => { await store.dispatch(command) }
   const connection = demo
-    ? connected ? 'Деморежим · Локальные данные' : 'Нет интернета · Локальные данные'
+    ? connected ? 'Локальный режим · Данные в браузере' : 'Нет интернета · Локальные данные'
     : connected ? 'Firebase · Синхронизация активна' : 'Firebase · Соединение восстанавливается'
   const openNotifications = () => { setSeen(Date.now()); setModal('notifications') }
 
@@ -285,7 +285,7 @@ export default function App() {
   return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`} onPointerDown={preferences.sound ? unlockSound : undefined}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
-      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} mode={store.mode} onlineUserIds={onlineUsers} /></Suspense>
+      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} onlineUserIds={onlineUsers} /></Suspense>
     </div> :
       <>
         {screen.page === 'home' && <Home state={state} user={session} now={now} connection={connection} connected={connected}

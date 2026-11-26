@@ -37,6 +37,7 @@ export default defineConfig({
     : {
         command: `npm run ${preview ? 'preview' : 'dev'} -- --host 127.0.0.1 --port ${port} --strictPort`,
         url: appUrl,
+        env: { VITE_TEST_FIXTURES: '1' },
         reuseExistingServer: !preview && !process.env.CI,
         timeout: 30_000,
       },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyCommand, availableQuantity, createDemoState, DomainError, emptyState, isActiveOrder,
-  normalizeState, orderAlerts, orderStatus, orderTotal, stats, stockStatus,
+  normalizeState, removeSampleData, orderAlerts, orderStatus, orderTotal, stats, stockStatus,
 } from '../src/domain'
 import type { Command, Product, Session, State } from '../src/domain'
 
@@ -211,13 +211,39 @@ describe('администрирование и формат Firebase', () => {
     expect(Object.values(decoded.inventoryReservations).some(row => row.orderId === orderId && row.itemId === itemId)).toBe(true)
   })
 
-  it('ограничивает сброс и загрузку тестовых данных деморежимом', () => {
+  it('убирает учебное меню и заказы, сохраняя пользовательские записи', () => {
     const { execute, state } = fixture()
-    expect(() => execute({ type: 'clearDemo' }, { ...admin, demo: false })).toThrow(/деморежиме/)
-    execute({ type: 'clearDemo' }, admin)
-    expect(state().orders).toEqual({})
-    expect(state().users[admin.userId].active).toBe(true)
-    execute({ type: 'seedDemo' }, admin)
-    expect(state().orders['demo-order-29']).toBeDefined()
+    const product = {...state().products.cheesecake, id: 'actual-product', name: 'Позиция заведения', cost: 120}
+    execute({ type: 'saveProduct', product }, admin)
+    execute({ type: 'createOrder', orderId: 'actual-order', tableId: 'table-12', guestCount: 1 })
+    const migrated = removeSampleData(state())
+    expect(Object.keys(migrated.orders)).toEqual(['actual-order'])
+    expect(Object.keys(migrated.products)).toEqual([product.id])
+    expect(migrated.categories[product.categoryId]).toBeDefined()
+    expect(migrated.tables['table-12']).toBeDefined()
+    expect(migrated.users[admin.userId].active).toBe(true)
+    expect(stats(migrated, 'day', undefined, timestamp + minute).sales).toBe(0)
+    expect(removeSampleData(migrated)).toBe(migrated)
+  })
+
+  it('фиксирует себестоимость при отправке и учитывает заказ только после закрытия', () => {
+    let state = emptyState()
+    const run = (command: Command, id: string) => {
+      state = applyCommand(state, admin, command, {id, now: timestamp})
+    }
+    run({type: 'registerUser'}, 'login')
+    run({type: 'importMenu', json: JSON.stringify({products:[
+      {name: 'Позиция', category: 'Меню', price: 150, cost: 40}
+    ]})}, 'menu')
+    const product = Object.values(state.products)[0]
+    run({type: 'createOrder', orderId: 'order-a', tabName: 'Гость', guestCount: 1}, 'order')
+    run({type: 'addItem', orderId: 'order-a', guestId: 'guest-1', itemId: 'item-a', productId: product.id, quantity: 2}, 'add')
+    run({type: 'sendOrder', orderId: 'order-a'}, 'send')
+    run({type: 'saveProduct', product: {...product, cost: 60}}, 'cost-change')
+    run({type: 'readyItem', orderId: 'order-a', itemId: 'item-a'}, 'ready')
+    run({type: 'serveItem', orderId: 'order-a', itemId: 'item-a'}, 'serve')
+    expect(stats(state, 'day', undefined, timestamp).sales).toBe(0)
+    run({type: 'closeOrder', orderId: 'order-a'}, 'close')
+    expect(stats(state, 'day', undefined, timestamp)).toMatchObject({sales: 300, grossProfit: 220})
   })
 })
