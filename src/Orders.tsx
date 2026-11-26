@@ -1,7 +1,7 @@
 import {
   ArrowDownUp, ArrowLeft, ArrowUpRight, Ban, BookOpen, Check, ChefHat, ChevronRight,
   CircleAlert, ClipboardList, Clock3, Ellipsis, ImageOff, LayoutGrid, Minus, Plus,
-  Receipt, Search, Send, UserRound, Users, X,
+  Search, Send, UserRound, Users, X,
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -483,7 +483,9 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   alert?: OrderAlert;
 }) {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
-  const [menu, setMenu] = useState<'options' | 'cancel' | null>(null);
+  const [menu, setMenu] = useState<'options' | 'cancel' | 'checkout' | null>(null);
+  const tap = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  useEffect(() => () => { if (tap.current) clearTimeout(tap.current.timer); }, []);
   const mutation = useMutations(execute);
   const items = orderItems(order);
   const own = user.userId === order.waiterId || user.role === 'admin';
@@ -504,7 +506,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
     if (drafts.length) {
       action = { label: 'Отправить на кухню', execute: () => { void mutation.perform({ type: 'sendOrder', orderId: order.id }); }, icon: <Send size={18} /> };
     } else if (allServed) {
-      action = { label: 'Завершить обслуживание', execute: () => { void mutation.perform({ type: 'closeOrder', orderId: order.id }); }, icon: <Check size={19} /> };
+      action = { label: 'К расчёту', execute: () => { mutation.clearError(); setMenu('checkout'); }, icon: <Check size={19} /> };
     } else if (hasGuests && !order.precheckAt) {
       action = { label: items.length ? 'Добавить дозаказ' : 'Добавить позиции', execute: () => catalog(order.guestIds[0]), icon: <Plus size={21} /> };
     }
@@ -514,6 +516,25 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
     if (await mutation.perform({ type, orderId: order.id, itemId })) {
       if (type !== 'readyItem') closeMenu();
     }
+  };
+
+  const selectItem = (item: OrderItem, keyboard: boolean) => {
+    const previous = tap.current;
+    if (previous) clearTimeout(previous.timer);
+    tap.current = null;
+    mutation.clearError();
+    if (!editable || item.status !== 'ready' || keyboard) {
+      setSelectedItem(item.id);
+      return;
+    }
+    if (previous?.id === item.id) {
+      void itemAction('serveItem', item.id);
+      return;
+    }
+    tap.current = { id: item.id, timer: setTimeout(() => {
+      tap.current = null;
+      setSelectedItem(item.id);
+    }, 280) };
   };
 
   return (
@@ -537,7 +558,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
             </div>}
           </header>
           <div className="order-item-list">
-            {guestItems.map((item) => <button type="button" className="order-item-row" key={item.id} onClick={() => { mutation.clearError(); setSelectedItem(item.id); }}>
+            {guestItems.map((item) => <button type="button" className={`order-item-row ${item.status === 'served' ? 'order-item-served' : ''}`} key={item.id} onClick={event => selectItem(item, event.detail === 0)}>
               <span className="order-item-quantity">{item.quantity}</span>
               <span className="order-item-description">
                 <strong>{item.name}</strong>
@@ -562,8 +583,6 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       <div className="order-bottom order-editor-bottom">
         {!selected && !menu && <FormError text={mutation.error} />}
         <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
-        {editable && allServed && !order.precheckAt && <button type="button" className="secondary" disabled={mutation.busy}
-          onClick={() => { void mutation.perform({ type: 'precheckOrder', orderId: order.id }); }}><Receipt size={18} />Запросить пречек</button>}
         {action && <button type="button" className="primary" disabled={mutation.busy} onClick={action.execute}>{action.icon}{action.label}</button>}
       </div>
       {selected && <OrderSheet title={selected.name} locked={mutation.busy} onClose={closeMenu}>
@@ -594,8 +613,22 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
             {editable && (selected.status === 'draft' || selected.status === 'preparing' || selected.status === 'ready') && <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={() => { void itemAction('cancelItem', selected.id); }}><Ban size={17} />{selected.status === 'draft' ? 'Удалить позицию' : 'Отменить позицию'}</button>}
           </div>}
       </OrderSheet>}
-      {menu && <OrderSheet title={menu === 'cancel' ? cancelLabel + '?' : 'Действия заказа'} onClose={closeMenu} locked={mutation.busy}>
-        {menu === 'cancel' ? <div className="order-sheet-content">
+      {menu && <OrderSheet title={menu === 'checkout' ? 'Позиции для кассы' : menu === 'cancel' ? cancelLabel + '?' : 'Действия заказа'} onClose={closeMenu} locked={mutation.busy}>
+        {menu === 'checkout' ? <div className="order-sheet-content">
+          <div className="order-sheet-list">
+            {items.map(item => <div className="order-checkout-line" key={item.id}>
+              <span>{item.quantity} × {item.name}
+                {(item.sizeName || item.options.length > 0) && <small>{[item.sizeName, ...item.options.map(option => option.name)].filter(Boolean).join(' · ')}</small>}
+              </span>
+              <strong>{formatCurrency(item.quantity * item.unitPrice)}</strong>
+            </div>)}
+          </div>
+          <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
+          <FormError text={mutation.error} />
+          <CloseOrderSwipe disabled={mutation.busy || !editable || !allServed} onComplete={async () => {
+            if (await mutation.perform({ type: 'closeOrder', orderId: order.id })) closeMenu();
+          }} />
+        </div> : menu === 'cancel' ? <div className="order-sheet-content">
           <p className="order-sheet-caption">{unsent ? 'Черновик будет удалён из активных заказов.' : 'Невыданные позиции будут отменены, зарезервированный остаток освободится.'}</p>
           <FormError text={mutation.error} />
           <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={async () => {
@@ -616,6 +649,38 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       </OrderSheet>}
     </main>
   );
+}
+
+function CloseOrderSwipe({ disabled, onComplete }: {disabled: boolean; onComplete: () => void}) {
+  const track = useRef<HTMLDivElement>(null);
+  const start = useRef<number | null>(null);
+  const [offset, setOffset] = useState(0);
+  return <div className="order-swipe" ref={track}>
+    <span aria-hidden="true">Свайпните, чтобы закрыть</span>
+    <button type="button" aria-label="Закрыть заказ" disabled={disabled} style={{transform: `translateX(${offset}px)`}}
+      onClick={event => { if (event.detail === 0) onComplete(); }}
+      onPointerDown={event => {
+        if (!event.isPrimary || event.button !== 0) return;
+        start.current = event.clientX;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={event => {
+        if (start.current === null) return;
+        const distance = (track.current?.clientWidth ?? 0) - event.currentTarget.offsetWidth - 8;
+        setOffset(Math.max(0, Math.min(distance, event.clientX - start.current)));
+      }}
+      onPointerUp={event => {
+        if (start.current === null) return;
+        const distance = (track.current?.clientWidth ?? 0) - event.currentTarget.offsetWidth - 8;
+        const complete = distance > 0 && event.clientX - start.current >= distance - 7;
+        start.current = null;
+        setOffset(0);
+        if (complete) onComplete();
+      }}
+      onLostPointerCapture={() => { start.current = null; setOffset(0); }}>
+      <ChevronRight size={23} />
+    </button>
+  </div>;
 }
 
 function ProductImage({ product, compact = false }: { product: Product; compact?: boolean }) {

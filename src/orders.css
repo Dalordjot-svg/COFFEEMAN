@@ -719,3 +719,11 @@ html:has(.order-sheet[open]) { overflow: hidden; }
     transition-duration: .01ms !important;
   }
 }
+
+.order-screen .order-item-served { background: #193125; }
+.order-screen .item-status-served { color: var(--green, #60d186); }
+.order-checkout-line { display: flex; padding: 10px 4px; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--order-edge); }
+.order-checkout-line small { display: block; color: var(--muted); }
+.order-checkout-line strong { white-space: nowrap; }
+.order-swipe { position: relative; min-height: 52px; padding: 4px 10px 4px 50px; display: grid; place-items: center; text-align: center; border-radius: 12px; background: #182c50; color: #e6eeff; font-weight: 650; }
+.order-swipe button { position: absolute; inset: 4px auto 4px 4px; width: 44px; display: grid; place-items: center; border-radius: 9px; background: var(--blue-fill); color: white; touch-action: none; }

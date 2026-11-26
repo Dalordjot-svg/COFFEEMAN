@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyCommand, availableQuantity, createDemoState, DomainError, emptyState, isActiveOrder,
+  applyCommand, availableQuantity, configureLocalVenue, createDemoState, DomainError, emptyState, isActiveOrder,
   normalizeState, removeSampleData, orderAlerts, orderStatus, orderTotal, stats, stockStatus,
 } from '../src/domain'
 import type { Command, Product, Session, State } from '../src/domain'
@@ -224,6 +224,19 @@ describe('администрирование и формат Firebase', () => {
     expect(migrated.users[admin.userId].active).toBe(true)
     expect(stats(migrated, 'day', undefined, timestamp + minute).sales).toBe(0)
     expect(removeSampleData(migrated)).toBe(migrated)
+  })
+
+  it('настраивает 20 столов, очищает каталог и начинает отчёт заново, сохраняя историю', () => {
+    const previous = createDemoState(timestamp)
+    previous.sampleDataRemoved = true
+    const next = configureLocalVenue(previous, timestamp + minute)
+    expect(Object.values(next.halls).map(hall => hall.name)).toEqual(['Зал'])
+    expect(Object.values(next.tables).map(table => table.name)).toEqual(Array.from({length: 20}, (_, index) => String(index + 1)))
+    expect(next.products).toEqual({})
+    expect(next.inventory).toEqual({})
+    expect(next.orders['demo-today-0']).toEqual(previous.orders['demo-today-0'])
+    expect(stats(next, 'day', undefined, timestamp + minute)).toMatchObject({sales: 0, grossProfit: 0})
+    expect(configureLocalVenue(next, timestamp + minute * 2)).toBe(next)
   })
 
   it('фиксирует себестоимость при отправке и учитывает заказ только после закрытия', () => {

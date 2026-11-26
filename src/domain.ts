@@ -36,6 +36,7 @@ export type Settings = { venueName: string; waitMinutes: number; criticalMinutes
 export type State = {
   schemaVersion: 1
   sampleDataRemoved?: true
+  venueResetAt?: number
   users: Record<string, User>
   devices: Record<string, Device>
   categories: Record<string, Category>
@@ -138,6 +139,7 @@ export function normalizeState(raw: unknown): State {
   if (raw.schemaVersion && raw.schemaVersion !== result.schemaVersion) {
     throw new DomainError('Версия данных не поддерживается этим приложением')
   }
+  if (numeric(raw.venueResetAt)) result.venueResetAt = raw.venueResetAt
   if (raw.sampleDataRemoved === true) result.sampleDataRemoved = true
   result.users = records<User>(raw.users, row => namedId(row) && numeric(row.createdAt) && (row.role === 'admin' || row.role === 'waiter'))
   result.devices = records<Device>(raw.devices, row => safeKey(row.id) && safeKey(row.userId))
@@ -266,7 +268,7 @@ export function stats(state: State, period: Period, userId?: string, now = Date.
   for (const order of entries(state.orders)) {
     if (userId && order.waiterId !== userId) continue
     if (isActiveOrder(order)) active++
-    if (order.closedAt === undefined || order.closedAt < start.getTime() || order.closedAt > now || order.canceledAt !== undefined) continue
+    if (order.closedAt === undefined || order.closedAt < Math.max(start.getTime(), state.venueResetAt ?? 0) || order.closedAt > now || order.canceledAt !== undefined) continue
     orders++
     guests += order.guestIds.length
     const closed = new Date(order.closedAt)
@@ -1023,6 +1025,51 @@ export function removeSampleData(state: State): State {
   }
   next.sampleDataRemoved = true
   return next
+}
+
+export function configureLocalVenue(previous: State, now: number): State {
+  if (previous.venueResetAt !== undefined) return previous
+  const state = normalizeState(removeSampleData(previous))
+  const oldHalls = state.halls
+  const oldTables = state.tables
+  const hallId = 'venue-main'
+  const tablePrefix = 'venue-table-'
+  state.halls = { [hallId]: { id: hallId, name: 'Зал', sort: 0 } }
+  state.tables = Object.fromEntries(Array.from({length: 20}, (_, index) => {
+    const name = String(index + 1)
+    const id = tablePrefix + name
+    return [id, { id, name, hallId, sort: index, capacity: 4 }]
+  }))
+  const occupied = new Set<string>()
+  for (const order of entries(state.orders)) {
+    if (!isActiveOrder(order)) continue
+    const oldTable = order.tableId ? oldTables[order.tableId] : undefined
+    const oldHall = oldTable ? oldHalls[oldTable.hallId] : undefined
+    const table = oldTable && oldHall && !/бар|террас/i.test(oldHall.name) ? state.tables[tablePrefix + oldTable.name.trim()] : undefined
+    if (table && !occupied.has(table.id)) {
+      occupied.add(table.id)
+      order.tableId = table.id
+      order.hallId = hallId
+    } else {
+      delete order.tableId
+      delete order.hallId
+    }
+    for (const item of orderItems(order)) {
+      if (item.status === 'draft') {
+        item.status = 'canceled'
+        item.canceledAt = now
+      }
+    }
+  }
+  state.categories = {}
+  state.products = {}
+  state.modifiers = {}
+  state.inventory = {}
+  for (const notice of entries(state.notifications)) {
+    if (notice.type === 'stock') delete state.notifications[notice.id]
+  }
+  state.venueResetAt = now
+  return state
 }
 
 export function createDemoState(now = Date.now()): State {

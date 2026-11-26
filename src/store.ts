@@ -1,5 +1,5 @@
 import {
-  applyCommand, createDemoState, emptyState, newId, normalizeState, removeSampleData,
+  applyCommand, configureLocalVenue, createDemoState, emptyState, newId, normalizeState,
 } from './domain'
 import type { Command, Session, State } from './domain'
 import { asError, browserValue, connectionSubscribe, deviceId, presenceExpiryMs, presencePulseMs } from './device-store'
@@ -113,7 +113,7 @@ function createDemoStore(): Store {
   const initialize = () => {
     ready ??= browserValue<State>(stateKey, (value) => import.meta.env.VITE_TEST_FIXTURES === '1'
       ? value ?? createDemoState()
-      : value ? removeSampleData(value) : { ...emptyState(), sampleDataRemoved: true })
+      : configureLocalVenue(value ?? { ...emptyState(), sampleDataRemoved: true }, Date.now()))
       .catch((error) => {
         ready = undefined
         throw error
