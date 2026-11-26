@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
-  Armchair, Ban, Bell, ClipboardList, FilePlus2, Home as HomeIcon, KeyRound,
+  Armchair, Ban, Bell, ClipboardList, FilePlus2, Home as HomeIcon,
   LoaderCircle, Plus, UserRound, WifiOff, X,
 } from 'lucide-react'
 import { emptyState, entries, orderAlerts, orderTitle } from './domain'
@@ -46,7 +46,6 @@ function Loading() {
 
 function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session) => void; startupError: string; onInstall?: () => void}) {
   const [name, setName] = useState('')
-  const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(startupError)
@@ -69,7 +68,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
     setError('')
     setPending(true)
     try {
-      onLogin(await store.login(name.trim(), remember, password))
+      onLogin(await store.login(name.trim(), remember))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось выполнить вход.')
     } finally {
@@ -84,12 +83,11 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
       </header>
       <form className="login-form" onSubmit={enter}>
         <label className="login-input"><UserRound size={19} /><input
-          type={demo ? 'text' : 'email'} aria-label={demo ? 'Имя сотрудника' : 'Электронная почта'}
-          placeholder={demo ? 'Имя сотрудника' : 'Электронная почта'} autoComplete={demo ? 'nickname' : 'username'}
-          value={name} onChange={event => setName(event.target.value)} required maxLength={demo ? 64 : 254} />
+          type="text" aria-label="Имя сотрудника"
+          placeholder="Имя сотрудника" autoComplete="nickname"
+          value={name} onChange={event => setName(event.target.value)} required maxLength={60} />
         </label>
-        {demo && <p className="muted">Введите имя точно так же, как при предыдущем входе.</p>}
-        {!demo && <label className="login-input"><KeyRound size={19} /><input type="password" aria-label="Пароль" placeholder="Пароль" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>}
+        <p className="muted">Введите имя точно так же, как при предыдущем входе.</p>
         {error && <p className="error-text" role="alert">{error}</p>}
         <button type="submit" className="primary" disabled={pending}>{pending ? 'Вход…' : 'Войти'}</button>
       </form>

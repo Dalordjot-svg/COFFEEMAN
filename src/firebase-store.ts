@@ -1,24 +1,10 @@
 import { initializeApp } from 'firebase/app'
-import {
-  browserLocalPersistence, browserSessionPersistence, connectAuthEmulator,
-  getAuth, getIdTokenResult, setPersistence, signInWithEmailAndPassword, signOut,
-} from 'firebase/auth'
-import type { User as AuthUser } from 'firebase/auth'
-import {
-  connectDatabaseEmulator, get, getDatabase, onDisconnect, onValue, ref, remove, serverTimestamp, set,
-} from 'firebase/database'
+import { get, getDatabase, onDisconnect, onValue, ref, remove, serverTimestamp, set, runTransaction } from 'firebase/database'
 import type { Database } from 'firebase/database'
-import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions'
-import { emptyState, newId, normalizeState } from './domain'
-import type { Command, Session, State, User } from './domain'
+import { applyCommand, configureLocalVenue, emptyState, newId, normalizeState } from './domain'
+import type { Command, Session } from './domain'
 import { asError, connectionSubscribe, deviceId, presenceExpiryMs, presencePulseMs } from './device-store'
-import type { CommandResult, Connection, ErrorListener, Listener, PresenceListener, Store } from './store'
-
-const sharedCollections = [
-  'users', 'categories', 'products', 'modifiers', 'halls', 'tables',
-  'orders', 'inventory', 'inventoryReservations', 'notifications', 'settings',
-] as const
-
+import type { Store, PresenceListener, ErrorListener } from './store'
 function startFirebasePresence(database: Database, actor: Session, listener: PresenceListener, onError?: ErrorListener) {
   const path = ref(database, `coffeeman/presence/${actor.userId}/${newId()}`)
   let active = true
@@ -91,243 +77,78 @@ function startFirebasePresence(database: Database, actor: Session, listener: Pre
   }
 }
 
+
 export function createFirebaseStore(): Store {
-  const config = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  }
-  const configurationError = Object.values(config).some((entry) => !entry) ?
-    new Error('Для рабочего режима заполните параметры Firebase, включая точный databaseURL') : undefined
-
-  function connect() {
-    if (configurationError) throw configurationError
-    const app = initializeApp(config, 'COFFEEMAN')
-    const auth = getAuth(app)
-    const database = getDatabase(app)
-    const functions = getFunctions(app, import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1')
-    const host = import.meta.env.VITE_FIREBASE_EMULATOR_HOST
-    if (host) {
-      if (!['localhost', '127.0.0.1'].includes(host) || !config.projectId?.startsWith('demo-')) {
-        throw new Error('Для эмуляторов Firebase требуется локальный хост и демонстрационный ID проекта')
-      }
-      connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true })
-      connectDatabaseEmulator(database, host, 9000)
-      connectFunctionsEmulator(functions, host, 5001)
-    }
-    return { auth, database, functions }
-  }
-
-  let connection: ReturnType<typeof connect> | undefined
-  const services = () => connection ??= connect()
-  let session: Session | null = null
-  let current: State | undefined
-  let unsubscribe: (() => void)[] = []
-  const listeners = new Map<Listener, ErrorListener | undefined>()
-  const presenceStops = new Set<() => Promise<void>>()
-
-  function stop() {
-    for (const detach of unsubscribe) detach()
-    unsubscribe = []
-    current = undefined
-  }
-
-  function publish(state: State) {
-    current = state
-    for (const listener of listeners.keys()) listener(state)
-  }
-
-  function report(error: unknown) {
-    for (const listener of listeners.values()) listener?.(asError(error))
-  }
-
-  function watch() {
-    if (!session || !listeners.size || unsubscribe.length) return
-    const actor = session
-    const { database } = services()
-    const collections = session.role === 'admin' ?
-      [...sharedCollections, 'devices', 'inventoryTransactions', 'auditLogs'] as const : sharedCollections
-    const pending = new Set<string>(collections)
-    const partial: Record<string, unknown> = { schemaVersion: emptyState().schemaVersion }
-    let scheduled = false
-    let active = true
-    unsubscribe = collections.map((key) => onValue(ref(database, `coffeeman/${key}`), (snapshot) => {
-      partial[key] = snapshot.val()
-      pending.delete(key)
-      if (pending.size || scheduled) return
-      scheduled = true
-      queueMicrotask(() => {
-        scheduled = false
-        if (!active) return
-        try { publish(normalizeState(partial)) } catch (error) { report(error) }
-      })
-    }, (error) => {
-      report(new Error(`Доступ к данным Firebase ограничен. ${error.message}`))
-    }))
-    unsubscribe.push(onValue(ref(database, `coffeeman/users/${actor.userId}`), (snapshot) => {
-      const user = snapshot.val() as User | null
-      if (user?.active && user.role === actor.role) return
-      queueMicrotask(() => {
-        if (!active) return
-        stop()
-        const state = emptyState()
-        state.users[actor.userId] = {
-          id: actor.userId, name: user?.name ?? actor.name, role: actor.role, active: false,
-          createdAt: user?.createdAt ?? 0, lastSeenAt: user?.lastSeenAt ?? 0,
-        }
-        publish(state)
-      })
-    }, report))
-    unsubscribe.push(() => { active = false })
-  }
-
-  function firebaseMessage(error: unknown) {
-    const code = (error as { code?: string })?.code
-    if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
-      return new Error('Проверьте адрес электронной почты и пароль')
-    }
-    if (code === 'auth/user-disabled') return new Error('Доступ сотрудника отключён')
-    if (code === 'auth/too-many-requests') return new Error('Слишком много попыток входа. Повторите позже')
-    if (code === 'auth/network-request-failed' || code === 'functions/unavailable') {
-      return new Error('Нет связи с Firebase. Проверьте подключение и повторите попытку')
-    }
-    return asError(error)
-  }
-
-  async function execute(command: Command, operationId = newId()) {
-    const warn = (code: string) => window.dispatchEvent(new CustomEvent('coffeeman-sync-error', { detail: { code, operationId } }))
-    if (!navigator.onLine) { warn('network/offline'); throw new Error('Для изменения рабочих данных требуется подключение') }
-    const { functions } = services()
-    const call = httpsCallable<{ command: Command; operationId: string; deviceId: string }, CommandResult>(
-      functions, 'coffeemanCommand', { timeout: 20000 },
-    )
-    const watchdog = window.setInterval(() => warn('sync/confirmation-pending'), 10000)
-    try {
-      // Firebase callable encoding converts undefined values to null.
-      const payload = JSON.parse(JSON.stringify(command)) as Command
-      const result = (await call({ command: payload, operationId, deviceId: await deviceId() })).data
-      window.dispatchEvent(new CustomEvent('coffeeman-sync-confirmed', { detail: { operationId } }))
-      return result
-    } catch (error) {
-      warn((error as { code?: string })?.code || 'sync/unknown')
-      throw firebaseMessage(error)
-    } finally {
-      window.clearInterval(watchdog)
-    }
-  }
-
-  async function establish(user: AuthUser, register: boolean): Promise<Session> {
-    const token = await getIdTokenResult(user)
-    const role = token.claims.coffeemanRole
-    if (role !== 'admin' && role !== 'waiter') throw new Error('Для аккаунта не назначен доступ к COFFEEMAN')
-    const name = token.claims.name
-    const actor: Session = {
-      userId: user.uid, deviceId: await deviceId(), role, demo: false,
-      name: typeof name === 'string' && name.trim() ? name.trim() : user.email?.split('@')[0] || 'Сотрудник',
-    }
-    if (register) {
-      await execute({ type: 'registerUser' })
-    } else if (navigator.onLine) {
-      const snapshot = await get(ref(services().database, `coffeeman/users/${user.uid}`))
-      const profile = snapshot.val() as User | null
-      if (!profile) await execute({ type: 'registerUser' })
-      else if (!profile.active || profile.role !== role) throw new Error('Учётная запись недоступна')
-      else actor.name = profile.name
-    }
-    session = actor
-    watch()
-    return actor
-  }
-
-  return {
-    mode: 'firebase',
-
-    subscribe(listener, onError) {
-      listeners.set(listener, onError)
-      if (current) listener(current)
-      try { watch() } catch (error) { onError?.(asError(error)) }
-      return () => {
-        listeners.delete(listener)
-        if (!listeners.size) stop()
-      }
-    },
-
-    subscribeConnection(listener) {
-      let connected: boolean | undefined
-      const detachNetwork = connectionSubscribe(listener, () => {
-        if (!navigator.onLine || connected === false || configurationError) return 'offline'
-        return connected ? 'online' : 'connecting'
-      })
-      if (configurationError) return detachNetwork
-      try {
-        const detachFirebase = onValue(ref(services().database, '.info/connected'), (snapshot) => {
-          connected = snapshot.val() === true
-          listener(connected ? 'online' : 'offline')
-        }, () => listener('offline'))
-        return () => {
-          detachFirebase()
-          detachNetwork()
-        }
-      } catch {
-        listener('offline')
-        return detachNetwork
-      }
-    },
-
-    subscribePresence(listener, onError) {
-      if (!session) {
-        listener(new Set())
-        return () => undefined
-      }
-      const close = startFirebasePresence(services().database, session, listener, onError)
-      const stopPresence = async () => {
-        if (presenceStops.delete(stopPresence)) await close()
-      }
-      presenceStops.add(stopPresence)
-      return () => { void stopPresence() }
-    },
-
-    async login(email, remember, password) {
-      if (!email.trim() || !password) throw new Error('Введите адрес электронной почты и пароль')
-      const { auth } = services()
-      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence)
-      try {
-        const credential = await signInWithEmailAndPassword(auth, email.trim(), password)
-        return await establish(credential.user, true)
-      } catch (error) {
-        if (auth.currentUser) await signOut(auth)
-        throw firebaseMessage(error)
-      }
-    },
-
-    async restore() {
-      if (configurationError) return null
-      const { auth } = services()
-      await auth.authStateReady()
-      if (!auth.currentUser) return null
-      try {
-        return await establish(auth.currentUser, false)
-      } catch (error) {
-        throw firebaseMessage(error)
-      }
-    },
-
-    async logout() {
-      const release = Promise.allSettled([...presenceStops].map(stopPresence => stopPresence()))
-      await new Promise<void>(resolve => {
-        const timeout = window.setTimeout(resolve, 650)
-        void release.finally(() => { window.clearTimeout(timeout); resolve() })
-      })
-      session = null
-      stop()
-      await signOut(services().auth)
-    },
-
-    async dispatch(command, operationId) {
-      if (!session) throw new Error('Сначала войдите в систему')
-      await execute(command, operationId)
-    },
-  }
+ const database = getDatabase(initializeApp({
+ apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+ authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+ databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+ projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+ appId: import.meta.env.VITE_FIREBASE_APP_ID,
+ }, 'COFFEEMAN'))
+ const root = ref(database, 'coffeeman')
+ const key = 'coffeeman.cloud.session.v2'
+ let session: Session | null = null
+ let connected = false
+ const alias = (name: string) => name.normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU')
+ async function change(transform: (raw: unknown) => unknown, operationId: string) {
+ const warn = (code: string) => window.dispatchEvent(new CustomEvent('coffeeman-sync-error',{detail:{code,operationId}}))
+ if (!navigator.onLine) { warn('network/offline'); throw new Error('Нет подключения к сети') }
+ const timer = window.setInterval(()=>warn('sync/confirmation-pending'),10000)
+ try {
+ const result = await runTransaction(root, transform, {applyLocally:false})
+ if (!result.committed) throw new Error('Операция не подтверждена')
+ window.dispatchEvent(new CustomEvent('coffeeman-sync-confirmed',{detail:{operationId}}))
+ } catch(e) { warn((e as {code?:string})?.code || 'sync/unknown'); throw e }
+ finally { window.clearInterval(timer) }
+ }
+ function stateOf(raw: unknown) { return raw ? normalizeState(raw) : configureLocalVenue({...emptyState(),sampleDataRemoved:true},Date.now()) }
+ function merge(raw: unknown, next: ReturnType<typeof stateOf>) { return JSON.parse(JSON.stringify({...((raw ?? {}) as object),...next})) }
+ return {
+ mode:'firebase',
+ subscribe(listener,onError) { return onValue(root,s=>listener(normalizeState(s.val())),e=>onError?.(asError(e))) },
+ subscribeConnection(listener) {
+ const stop = connectionSubscribe(listener,()=>!navigator.onLine?'offline':connected?'online':'connecting')
+ const detach=onValue(ref(database,'.info/connected'),s=>{connected=s.val()===true;listener(connected?'online':'offline')},()=>listener('offline'))
+ return ()=>{stop();detach()}
+ },
+ subscribePresence(listener,onError) { if (!session) {listener(new Set());return ()=>undefined} const close=startFirebasePresence(database,session,listener,onError);return ()=>{void close()} },
+ async login(input,remember) {
+ const name=input.normalize('NFC').trim().replace(/\s+/g,' ')
+ if (!name || name.length>60) throw new Error('Введите имя длиной от 1 до 60 символов')
+ const ownDevice=await deviceId(), id=newId(), op=newId(), now=Date.now()
+ const admin=alias(name)==='admin'
+ let actor: Session | undefined
+ await get(root)
+ await change(raw=>{
+ const state=stateOf(raw)
+ const matches=Object.values(state.users).filter(u=>admin?u.role==='admin':u.role==='waiter'&&alias(u.name)===alias(name))
+ if(matches.length>1) throw new Error('Несколько профилей с таким именем. Обратитесь к администратору')
+ const match=matches[0]
+ actor={userId:match?.id ?? (admin?'demo-admin':id),deviceId:ownDevice,demo:false,role:admin?'admin':'waiter',name:match?.name??(admin?'Администратор':name)}
+ return merge(raw,applyCommand(state,actor,{type:'registerUser'},{id:op,now}))
+ },op)
+ if(!actor) throw new Error('Вход не подтверждён')
+ session=actor
+ sessionStorage.setItem(key,JSON.stringify(actor))
+ if(remember)localStorage.setItem(key,JSON.stringify(actor));else localStorage.removeItem(key)
+ return actor
+ },
+ async restore(){
+ const raw=sessionStorage.getItem(key)??localStorage.getItem(key)
+ if(!raw)return null
+ const saved=JSON.parse(raw) as Session
+ if(saved.deviceId!==await deviceId())return null
+ const user=normalizeState((await get(root)).val()).users[saved.userId]
+ if(!user?.active)return null
+ return session={...saved,name:user.name,role:user.role,demo:false}
+ },
+ async logout(){session=null;sessionStorage.removeItem(key);localStorage.removeItem(key)},
+ async dispatch(command:Command,operationId=newId()){
+ const actor=session
+ if(!actor)throw new Error('Сначала войдите в систему')
+ const now=Date.now()
+ await change(raw=>merge(raw,applyCommand(stateOf(raw),actor,command,{id:operationId,now})),operationId)
+ }
+ }
 }
