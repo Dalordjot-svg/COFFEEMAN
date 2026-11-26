@@ -753,11 +753,20 @@ export function applyCommand(previous: State, session: Session, command: Command
     case 'closeOrder': {
       const order = activeOrder(state, session, command.orderId)
       const items = orderItems(order)
-      requireCondition(items.length && items.every(item => item.status === 'served'), 'Выдайте все позиции перед завершением обслуживания')
+      requireCondition(items.length && items.every(item => item.status !== 'draft'), 'Сначала отправьте все позиции')
       if (command.type === 'precheckOrder') {
         if (order.precheckAt !== undefined) return previous
         order.precheckAt = stamp.now
       } else {
+        requireCondition(order.precheckAt !== undefined, 'Сначала оформите предчек')
+        for (const item of items) {
+          if (item.status === 'served') continue
+          inventoryMovement(state, stamp, order, item, 'serve')
+          inventoryIds.add(item.productId)
+          item.status = 'served'
+          item.readyAt ??= stamp.now
+          item.servedAt = stamp.now
+        }
         order.closedAt = stamp.now
       }
       orderId = order.id

@@ -494,7 +494,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   const currentStatus = orderAppearance(order, alert);
   const drafts = items.filter((item) => item.status === 'draft');
   const ready = items.filter((item) => item.status === 'ready');
-  const allServed = items.length > 0 && items.every((item) => item.status === 'served');
+  const canPrecheck = items.length > 0 && drafts.length === 0;
   const unsent = items.every(item => item.status === 'draft');
   const cancelLabel = unsent ? 'Удалить заказ' : 'Отменить заказ';
   const hasGuests = order.guestIds.length > 0;
@@ -503,10 +503,10 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
 
   let action: { label: string; execute: () => void; icon: ReactNode } | undefined;
   if (editable) {
-    if (drafts.length) {
-      action = { label: 'Отправить на кухню', execute: () => { void mutation.perform({ type: 'sendOrder', orderId: order.id }); }, icon: <Send size={18} /> };
-    } else if (allServed) {
+    if (order.precheckAt !== undefined) {
       action = { label: 'К расчёту', execute: () => { mutation.clearError(); setMenu('checkout'); }, icon: <Check size={19} /> };
+    } else if (drafts.length) {
+      action = { label: 'Отправить на кухню', execute: () => { void mutation.perform({ type: 'sendOrder', orderId: order.id }); }, icon: <Send size={18} /> };
     } else if (hasGuests && !order.precheckAt) {
       action = { label: items.length ? 'Добавить дозаказ' : 'Добавить позиции', execute: () => catalog(order.guestIds[0]), icon: <Plus size={21} /> };
     }
@@ -583,7 +583,9 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       <div className="order-bottom order-editor-bottom">
         {!selected && !menu && <FormError text={mutation.error} />}
         <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
+        {editable && order.precheckAt !== undefined && <button type="button" className="secondary" disabled={mutation.busy} onClick={() => { void mutation.perform({type:'reopenOrder',orderId:order.id}); }}>Отмена предчека</button>}
         {action && <button type="button" className="primary" disabled={mutation.busy} onClick={action.execute}>{action.icon}{action.label}</button>}
+        {editable && order.precheckAt === undefined && canPrecheck && <button type="button" className="primary" disabled={mutation.busy} onClick={() => { void mutation.perform({type:'precheckOrder',orderId:order.id}); }}>Предчек</button>}
       </div>
       {selected && <OrderSheet title={selected.name} locked={mutation.busy} onClose={closeMenu}>
         {editable && !order.precheckAt && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm
@@ -625,7 +627,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
           </div>
           <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
           <FormError text={mutation.error} />
-          <CloseOrderSwipe disabled={mutation.busy || !editable || !allServed} onComplete={async () => {
+          <CloseOrderSwipe disabled={mutation.busy || !editable || order.precheckAt === undefined} onComplete={async () => {
             if (await mutation.perform({ type: 'closeOrder', orderId: order.id })) closeMenu();
           }} />
         </div> : menu === 'cancel' ? <div className="order-sheet-content">
@@ -642,7 +644,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
           {editable && ready.length > 0 && <button type="button" className="order-sheet-row" onClick={() => { setMenu(null); setSelectedItem(ready[0].id); }}><Check size={19} />Готовые блюда · {ready.length}</button>}
           {editable && order.precheckAt && <button type="button" className="order-sheet-row" disabled={mutation.busy} onClick={async () => {
             if (await mutation.perform({ type: 'reopenOrder', orderId: order.id })) closeMenu();
-          }}><ArrowUpRight size={19} />Возобновить обслуживание</button>}
+          }}><ArrowUpRight size={19} />Отмена предчека</button>}
           {editable && !items.some((item) => item.status === 'served') && <button type="button" className="order-sheet-row order-danger" onClick={() => setMenu('cancel')}><Ban size={19} />{cancelLabel}</button>}
           <FormError text={mutation.error} />
         </div>}
