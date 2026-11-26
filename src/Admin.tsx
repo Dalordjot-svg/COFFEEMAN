@@ -29,7 +29,7 @@ type Props = {
 type PriceDraft = Omit<PriceOption, 'price'> & { price: string }
 type ModifierDraft = Omit<Modifier, 'options'> & { options: PriceDraft[] }
 
-type Page = 'overview' | 'catalog' | 'floor' | 'staff' | 'more' | 'orders' | 'settings' | 'audit'
+type Page = 'overview' | 'catalog' | 'floor' | 'staff' | 'more' | 'orders' | 'settings' | 'audit' | 'reports'
 type Dialog =
   | { kind: 'product'; value?: Product }
   | { kind: 'import' }
@@ -48,6 +48,7 @@ const titles: Record<Page, string> = {
   orders: 'Все заказы',
   settings: 'Настройки системы',
   audit: 'Журнал операций',
+  reports: 'Отчёты',
 }
 
 const nav = [
@@ -69,6 +70,8 @@ const fieldNumber = (data: FormData, name: string) => Number(data.get(name))
 const colorValue = (color: string | undefined) => color && /^#[a-f0-9]{6}$/i.test(color) ? color : '#357afe'
 
 const auditNames: Record<string, string> = {
+  closeDay: 'Закрытие дня',
+  openDay: 'Открытие дня',
   registerUser: 'Вход сотрудника',
   saveProduct: 'Изменение товара',
   importMenu: 'Импорт меню',
@@ -792,7 +795,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
   const [page, setPage] = useState<Page>('overview')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
-  const currentPage = page === 'orders' || page === 'settings' || page === 'audit' ? 'more' : page
+  const currentPage = page === 'orders' || page === 'settings' || page === 'audit' || page === 'reports' ? 'more' : page
   const showBack = currentPage !== page
 
   function navigate(nextPage: Page) {
@@ -830,12 +833,14 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'floor' && <Floor state={state} open={setDialog} />}
         {page === 'staff' && <Staff state={state} onlineUserIds={onlineUserIds} open={setDialog} />}
         {page === 'orders' && <Orders state={state} open={setDialog} />}
+        {page === 'reports' && <DayReports state={state} execute={execute} />}
         {page === 'audit' && <Audit state={state} />}
         {page === 'settings' && <SystemSettings settings={state.settings} execute={execute} />}
         {page === 'more' && <>
           <div className="admin-panel">
             <ActionRow icon={<ClipboardList size={19} />} label="Заказы" detail="Статусы и назначение официантов" onClick={() => navigate('orders')} />
             <ActionRow icon={<SettingsIcon size={19} />} label="Настройки" detail="Заведение, пороги и тестовые данные" onClick={() => navigate('settings')} />
+            <ActionRow icon={<ClipboardList size={19} />} label="Отчёты и закрытие дня" onClick={() => navigate('reports')} />
             <ActionRow icon={<History size={19} />} label="Журнал операций" onClick={() => navigate('audit')} />
           </div>
           <div className="admin-panel"><ActionRow icon={<LogOut size={19} />} label="Выйти" onClick={onLogout} danger /></div>
@@ -857,4 +862,13 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
       {dialog.kind === 'order' && order && <OrderDetail order={order} state={state} execute={execute} openOrder={id => { setDialog(null); openOrder(id) }} />}
     </Modal>}
   </div>
+}
+
+function DayReports({state,execute}: Pick<Props,'state'|'execute'>) {
+ const [confirm,setConfirm]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const closed=Boolean(state.dayClosedAt && (state.dayOpenedAt??0)<=state.dayClosedAt), active=entries(state.orders).filter(isActiveOrder).length;
+ const from=state.dayOpenedAt??state.dayClosedAt??new Date().setHours(0,0,0,0);
+ const paid=entries(state.orders).filter(o=>o.closedAt!==undefined && o.closedAt>=from && !o.canceledAt);
+ const run=async()=>{setBusy(true);setError('');try{await execute({type:closed?'openDay':'closeDay'});setConfirm(false)}catch(e){setError(message(e))}finally{setBusy(false)}};
+ return <section className="admin-report"><h2>{closed?'День закрыт':'Текущий рабочий день'}</h2>{!closed&&<><p>Выручка по закрытым заказам: <strong>{rubles.format(paid.reduce((s,o)=>s+orderTotal(o),0))}</strong></p><p>Закрытых заказов: {paid.length} · Активных: {active}</p></>}{!closed&&active>0&&<p>Завершите все активные заказы перед закрытием дня.</p>}<button type="button" disabled={busy||(!closed&&active>0)} onClick={()=>closed?void run():setConfirm(true)}>{closed?'Открыть новый день':'Закрыть день'}</button>{confirm&&!closed&&<><p>Подтвердите закрытие дня. История сохранится, новые заказы будут заблокированы.</p><button disabled={busy} onClick={()=>void run()}>Подтвердить закрытие</button><button onClick={()=>setConfirm(false)}>Отмена</button></>}{error&&<p role="alert">{error}</p>}<h2>История отчётов</h2>{Object.values(state.dayReports??{}).sort((a,b)=>b.at-a.at).map(report=><article key={report.at}><strong>{formatTime(report.at)}</strong><p>{rubles.format(report.revenue)} · {report.count} заказов</p></article>)}</section>
 }

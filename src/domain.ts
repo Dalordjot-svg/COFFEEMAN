@@ -37,6 +37,9 @@ export type State = {
   schemaVersion: 1
   sampleDataRemoved?: true
   venueResetAt?: number
+  dayClosedAt?: number
+  dayOpenedAt?: number
+  dayReports?: Record<string, {at:number; from:number; revenue:number; count:number; actorId:string}>
   users: Record<string, User>
   devices: Record<string, Device>
   categories: Record<string, Category>
@@ -54,6 +57,7 @@ export type State = {
 }
 
 export type Command =
+  | { type: 'closeDay' | 'openDay' }
   | { type: 'registerUser' }
   | { type: 'createOrder'; orderId: string; tableId?: string; tabName?: string; guestCount: number }
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
@@ -140,6 +144,9 @@ export function normalizeState(raw: unknown): State {
   if (raw.schemaVersion && raw.schemaVersion !== result.schemaVersion) {
     throw new DomainError('Версия данных не поддерживается этим приложением')
   }
+  if (numeric(raw.dayClosedAt)) result.dayClosedAt = raw.dayClosedAt
+  if (numeric(raw.dayOpenedAt)) result.dayOpenedAt = raw.dayOpenedAt
+  result.dayReports = records<NonNullable<State['dayReports']>[string]>(raw.dayReports, row => numeric(row.at) && numeric(row.from) && numeric(row.revenue) && numeric(row.count) && typeof row.actorId === 'string')
   if (numeric(raw.venueResetAt)) result.venueResetAt = raw.venueResetAt
   if (raw.sampleDataRemoved === true) result.sampleDataRemoved = true
   result.users = records<User>(raw.users, row => namedId(row) && numeric(row.createdAt) && (row.role === 'admin' || row.role === 'waiter'))
@@ -554,7 +561,7 @@ function stockUpdates(before: State, after: State, stamp: Stamp, ids: Set<string
 }
 
 const adminCommands: ReadonlySet<Command['type']> = new Set([
-  'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearCatalog',
+  'closeDay', 'openDay', 'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearCatalog',
 ])
 
 function importEntityId(record: Record<string, unknown>, operationId: string, position: number) {
@@ -599,7 +606,22 @@ export function applyCommand(previous: State, session: Session, command: Command
         createdAt: device?.createdAt ?? stamp.now, lastSeenAt: stamp.now }
       break
     }
+    case 'closeDay': {
+      requireCondition(!state.dayClosedAt || (state.dayOpenedAt ?? 0) > state.dayClosedAt, 'День уже закрыт')
+      requireCondition(!entries(state.orders).some(isActiveOrder), 'Сначала завершите или отмените все открытые заказы')
+      const from = state.dayOpenedAt ?? state.dayClosedAt ?? new Date(stamp.now).setHours(0,0,0,0)
+      const paid = entries(state.orders).filter(o => o.closedAt !== undefined && o.closedAt >= from && o.closedAt <= stamp.now && !o.canceledAt)
+      state.dayReports = {...state.dayReports, [stamp.id]: {at:stamp.now,from,revenue:paid.reduce((sum,o)=>sum+orderTotal(o),0),count:paid.length,actorId:session.userId}}
+      state.dayClosedAt = stamp.now
+      break
+    }
+    case 'openDay': {
+      requireCondition(state.dayClosedAt && (state.dayOpenedAt ?? 0) <= state.dayClosedAt, 'День уже открыт')
+      state.dayOpenedAt = stamp.now
+      break
+    }
     case 'createOrder': {
+      requireCondition(!state.dayClosedAt || (state.dayOpenedAt ?? 0) > state.dayClosedAt, 'Рабочий день закрыт. Обратитесь к администратору')
       checkId(command.orderId)
       const guests = checkNumber(command.guestCount, 1, 100, 'количество гостей')
       requireCondition(!state.orders[command.orderId], 'Заказ уже создан')

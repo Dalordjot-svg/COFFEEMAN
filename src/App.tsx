@@ -185,7 +185,8 @@ export default function App() {
     // The initial demo data illustrates alerts without producing sound or toasts at login.
     if (demo && next.id.startsWith('alert_demo-')) return
     setToast(next.message)
-    if (preferences.vibration && 'vibrate' in navigator) navigator.vibrate(90)
+    if (preferences.vibration && 'vibrate' in navigator) navigator.vibrate([120,70,120])
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) { void navigator.serviceWorker?.ready.then(reg => reg.showNotification('COFFEEMAN', {body:next.message,tag:next.id})).catch(()=>undefined) }
     if (preferences.sound && audio.current?.state === 'running') {
       const audioContext = audio.current
       const oscillator = audioContext.createOscillator()
@@ -284,6 +285,8 @@ export default function App() {
   return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`} onPointerDown={preferences.sound ? unlockSound : undefined}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
+      <button type="button" onClick={openNotifications}>Уведомления {visibleNotices.filter(n=>n.at>seen).length || ''}</button>
+      {typeof Notification !== 'undefined' && Notification.permission === 'default' && <button type="button" onClick={()=>void Notification.requestPermission()}>Разрешить уведомления</button>}
       <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} onlineUserIds={onlineUsers} /></Suspense>
     </div> :
       <>
@@ -312,6 +315,7 @@ export default function App() {
       </div>
     </Sheet>}
     {modal === 'notifications' && <Sheet title="Уведомления" onClose={() => setModal(undefined)}>
+      {typeof Notification !== 'undefined' && Notification.permission === 'default' && <button type="button" onClick={()=>void Notification.requestPermission()}>Разрешить системные уведомления</button>}
       <div className="notice-list">
         {alerts.map(alert => <ActionRow key={`alert-${alert.orderId}`} icon={<Bell size={17} />}
           label={orderTitle(state.orders[alert.orderId])} detail={alert.reason} onClick={() => openOrder(alert.orderId)} />)}
