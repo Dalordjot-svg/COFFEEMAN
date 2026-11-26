@@ -197,17 +197,24 @@ export function createFirebaseStore(): Store {
   }
 
   async function execute(command: Command, operationId = newId()) {
-    if (!navigator.onLine) throw new Error('Для изменения рабочих данных требуется подключение')
+    const warn = (code: string) => window.dispatchEvent(new CustomEvent('coffeeman-sync-error', { detail: { code, operationId } }))
+    if (!navigator.onLine) { warn('network/offline'); throw new Error('Для изменения рабочих данных требуется подключение') }
     const { functions } = services()
     const call = httpsCallable<{ command: Command; operationId: string; deviceId: string }, CommandResult>(
       functions, 'coffeemanCommand', { timeout: 20000 },
     )
+    const watchdog = window.setInterval(() => warn('sync/confirmation-pending'), 10000)
     try {
       // Firebase callable encoding converts undefined values to null.
       const payload = JSON.parse(JSON.stringify(command)) as Command
-      return (await call({ command: payload, operationId, deviceId: await deviceId() })).data
+      const result = (await call({ command: payload, operationId, deviceId: await deviceId() })).data
+      window.dispatchEvent(new CustomEvent('coffeeman-sync-confirmed', { detail: { operationId } }))
+      return result
     } catch (error) {
+      warn((error as { code?: string })?.code || 'sync/unknown')
       throw firebaseMessage(error)
+    } finally {
+      window.clearInterval(watchdog)
     }
   }
 
