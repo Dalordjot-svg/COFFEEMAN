@@ -1,0 +1,53 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "coffeeman": {
+      "users": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole",
+        "$userId": {
+          ".read": "auth != null && auth.uid === $userId && (auth.token.coffeemanRole === 'admin' || auth.token.coffeemanRole === 'waiter')"
+        }
+      },
+      "categories": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "products": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "modifiers": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "halls": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "tables": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "orders": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "inventory": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "inventoryReservations": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "notifications": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "settings": {
+        ".read": "auth != null && (auth.token.coffeemanRole === 'waiter' || auth.token.coffeemanRole === 'admin') && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "devices": {
+        ".read": "auth != null && auth.token.coffeemanRole === 'admin' && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "inventoryTransactions": {
+        ".read": "auth != null && auth.token.coffeemanRole === 'admin' && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      },
+      "auditLogs": {
+        ".read": "auth != null && auth.token.coffeemanRole === 'admin' && root.child('coffeeman').child('users').child(auth.uid).child('active').val() === true && root.child('coffeeman').child('users').child(auth.uid).child('role').val() === auth.token.coffeemanRole"
+      }
+    }
+  }
+}

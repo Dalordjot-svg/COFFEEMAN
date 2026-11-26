@@ -1,0 +1,304 @@
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
+import {
+  Armchair, Ban, Bell, ClipboardList, FilePlus2, Home as HomeIcon, KeyRound,
+  LoaderCircle, Plus, UserRound, WifiOff, X,
+} from 'lucide-react'
+import { emptyState, entries, orderAlerts, orderTitle } from './domain'
+import type { Command, Session } from './domain'
+import { Orders } from './Orders'
+import type { OrdersScreen } from './Orders'
+import { store } from './store'
+import type { Connection } from './store'
+import { Home, Profile, Stock, Toggle, defaultPreferences } from './Waiter'
+import type { Preferences, ProfileScreen } from './Waiter'
+import { ActionRow, Empty, IconButton, Sheet } from './ui'
+
+const Admin = lazy(() => import('./Admin'))
+type Screen = OrdersScreen | {page: 'home' | 'stock'} | {page: 'profile'; view?: ProfileScreen}
+type Tab = 'home' | 'orders' | 'stock' | 'profile'
+const tabs = [
+  {page: 'home', title: 'Главная', Icon: HomeIcon},
+  {page: 'orders', title: 'Заказы', Icon: ClipboardList},
+  {page: 'stock', title: 'Стоп-лист', Icon: Ban},
+  {page: 'profile', title: 'Профиль', Icon: UserRound},
+] as const
+
+function sameScreen(a: Screen | undefined, b: Screen) {
+  if (!a || a.page !== b.page) return false
+  if (a.page === 'profile' && b.page === 'profile') return (a.view ?? 'profile') === (b.view ?? 'profile')
+  if (a.page === 'order' && b.page === 'order') return a.orderId === b.orderId
+  if (a.page === 'catalog' && b.page === 'catalog') {
+    return a.orderId === b.orderId && a.guestId === b.guestId && a.categoryId === b.categoryId
+  }
+  return true
+}
+
+function loadPreferences(id?: string): Preferences {
+  try { return {...defaultPreferences, ...JSON.parse(localStorage.getItem('coffeeman:preferences:' + id) ?? '{}')} }
+  catch { return defaultPreferences }
+}
+
+function Loading() {
+  return <div className="loading-page" role="status"><LoaderCircle className="spinning" size={25} /><small>Загрузка COFFEEMAN</small></div>
+}
+
+function Login({ onLogin, startupError }: {onLogin: (session: Session) => void; startupError: string}) {
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(true)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState(startupError)
+  const demo = store.mode === 'demo'
+  const enter = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setPending(true)
+    try {
+      onLogin(await store.login(name.trim(), remember, password))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось выполнить вход.')
+    } finally {
+      setPending(false)
+    }
+  }
+  return <main className="login-page">
+    <div className="login-content">
+      <header className="login-brand">
+        <img src={import.meta.env.BASE_URL + 'mark.svg'} alt="" width={88} height={88} />
+        <h1>COFFEEMAN</h1><p>Waiter System</p>
+      </header>
+      <form className="login-form" onSubmit={enter}>
+        <label className="login-input"><UserRound size={19} /><input
+          type={demo ? 'text' : 'email'} aria-label={demo ? 'Имя сотрудника' : 'Электронная почта'}
+          placeholder={demo ? 'Имя сотрудника' : 'Электронная почта'} autoComplete={demo ? 'nickname' : 'username'}
+          value={name} onChange={event => setName(event.target.value)} required maxLength={demo ? 64 : 254} />
+        </label>
+        {!demo && <label className="login-input"><KeyRound size={19} /><input type="password" aria-label="Пароль" placeholder="Пароль" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>}
+        {error && <p className="error-text" role="alert">{error}</p>}
+        <button type="submit" className="primary" disabled={pending}>{pending ? 'Вход…' : 'Войти'}</button>
+      </form>
+    </div>
+    <div className="login-footer">
+      <Toggle text="Запомнить меня" detail="На этом устройстве" value={remember} onChange={setRemember} />
+      {demo && <p className="mode-note">Деморежим · Вход как Паша или admin</p>}
+    </div>
+  </main>
+}
+
+export default function App() {
+  const [session, setSession] = useState<Session | null>(null)
+  const [state, setState] = useState(emptyState)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [network, setNetwork] = useState<Connection>(store.mode === 'demo' ? 'demo' : 'connecting')
+  const connected = network === 'online' || network === 'demo'
+  const [screen, setScreen] = useState<Screen>({page: 'home'})
+  const returnScreen = useRef<Screen>({page: 'orders'})
+  const [modal, setModal] = useState<'quick' | 'notifications'>()
+  const [toast, setToast] = useState('')
+  const [now, setNow] = useState(Date.now)
+  const [seen, setSeen] = useState(Date.now)
+  const [preferences, setPreferences] = useState(defaultPreferences)
+  const [stockFilter, setStockFilter] = useState<'all' | 'out' | 'low' | 'in'>('all')
+  const [stockQuery, setStockQuery] = useState('')
+  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day')
+  const audio = useRef<AudioContext | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const delivered = useRef(new Set<string>())
+  const runRestore = useRef<ReturnType<typeof store.restore> | undefined>(undefined)
+  const admin = session?.role === 'admin'
+  const active = session && state.users[session.userId]
+  const demo = store.mode === 'demo'
+
+  useEffect(() => {
+    let subscribed = true
+    runRestore.current ??= store.restore()
+    runRestore.current.then(value => {
+      if (subscribed) { setSession(value); setPreferences(loadPreferences(value?.userId)) }
+    }).catch(err => {
+      if (subscribed) setError(err instanceof Error ? err.message : 'Не удалось восстановить сессию.')
+    }).finally(() => { if (subscribed) setLoading(false) })
+    return () => { subscribed = false }
+  }, [])
+
+  useEffect(() => store.subscribeConnection(setNetwork), [])
+  useEffect(() => {
+    if (!session) return
+    return store.subscribe(next => {
+      setState(next)
+      setNow(Date.now())
+    }, err => setToast(err.message))
+  }, [session])
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 15000)
+    return () => { clearInterval(interval); clearTimeout(timer.current) }
+  }, [])
+  useEffect(() => {
+    if (!toast) return
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setToast(''), 4800)
+    return () => clearTimeout(timer.current)
+  }, [toast])
+
+  const visibleNotices = entries(state.notifications).filter(notice =>
+    (!notice.userId || notice.userId === session?.userId) && preferences[notice.type],
+  ).sort((a, b) => b.at - a.at)
+  const alerts = session && preferences.delay ? orderAlerts(state, now, session.userId).filter(alert => alert.tone !== 'green') : []
+  const liveSignals = [
+    ...visibleNotices.filter(notice => notice.at > seen).map(notice => ({id: notice.id, message: notice.message})),
+    ...alerts.map(alert => ({id: `alert_${alert.orderId}_${alert.reason}_${alert.tone}`, message: `${orderTitle(state.orders[alert.orderId])} · ${alert.reason}`})),
+  ]
+  const liveSignature = JSON.stringify(liveSignals)
+  useEffect(() => {
+    if (!session || modal === 'notifications') return
+    const signals = JSON.parse(liveSignature) as typeof liveSignals
+    const next = signals.find(signal => !delivered.current.has(signal.id))
+    signals.forEach(signal => delivered.current.add(signal.id))
+    if (!next) return
+    // The initial demo data illustrates alerts without producing sound or toasts at login.
+    if (demo && next.id.startsWith('alert_demo-')) return
+    setToast(next.message)
+    if (preferences.vibration && 'vibrate' in navigator) navigator.vibrate(90)
+    if (preferences.sound && audio.current?.state === 'running') {
+      const audioContext = audio.current
+      const oscillator = audioContext.createOscillator()
+      const volume = audioContext.createGain()
+      oscillator.frequency.value = 660
+      volume.gain.value = 0.12
+      volume.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + .27)
+      oscillator.connect(volume)
+      volume.connect(audioContext.destination)
+      oscillator.start()
+      oscillator.stop(audioContext.currentTime + .27)
+    }
+  }, [liveSignature, modal, session, preferences.sound, preferences.vibration, demo])
+
+  useEffect(() => {
+    const back = (event: PopStateEvent) => {
+      const target = event.state?.coffeemanScreen as Screen | undefined
+      setModal(undefined)
+      setScreen(target ?? {page: 'home'})
+    }
+    window.addEventListener('popstate', back)
+    return () => window.removeEventListener('popstate', back)
+  }, [])
+
+  const navigate = (target: Screen, reset = false) => {
+    setModal(undefined)
+    const current = window.history.state
+    const wantsNewTab = target.page === 'tables' && target.initialTab
+    if (!reset && !wantsNewTab && sameScreen(current?.previousScreen, target)) {
+      window.history.back()
+      return
+    }
+    const categoryChange = screen.page === 'catalog' && target.page === 'catalog'
+    const save = reset || categoryChange ? window.history.replaceState : window.history.pushState
+    save.call(window.history, {
+      coffeemanScreen: target.page === 'tables' ? {page: 'tables'} : target,
+      previousScreen: reset ? undefined : categoryChange ? current?.previousScreen : screen,
+    }, '')
+    setScreen(target)
+    if (target.page !== screen.page) window.scrollTo(0, 0)
+  }
+  const openOrder = (id: string) => {
+    returnScreen.current = screen
+    navigate({page: 'order', orderId: id})
+  }
+  const orderNavigate = (target: OrdersScreen) => {
+    if (target.page === 'order' && screen.page === 'orders') returnScreen.current = screen
+    navigate(target.page === 'orders' && screen.page === 'order' ? returnScreen.current : target)
+  }
+  const logout = async () => {
+    try {
+      await store.logout()
+      setState(emptyState())
+      setSession(null)
+      setToast('')
+      delivered.current.clear()
+      navigate({page: 'home'}, true)
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Не удалось завершить сеанс.')
+    }
+  }
+  const unlockSound = () => {
+    try {
+      audio.current ??= new AudioContext()
+      if (audio.current.state !== 'running') void audio.current.resume().catch(() => undefined)
+    } catch { /* Audio is optional on this device. */ }
+  }
+  const updatePreference = (key: keyof Preferences, value: boolean) => {
+    if (key === 'sound' && value) unlockSound()
+    if (key === 'vibration' && value && 'vibrate' in navigator) navigator.vibrate(65)
+    const updated = {...preferences, [key]: value}
+    setPreferences(updated)
+    try { localStorage.setItem('coffeeman:preferences:' + session?.userId, JSON.stringify(updated)) }
+    catch { /* Settings still apply in this session. */ }
+  }
+  const execute = async (command: Command) => { await store.dispatch(command) }
+  const connection = demo
+    ? connected ? 'Деморежим · Локальные данные' : 'Нет интернета · Локальные данные'
+    : connected ? 'Firebase · Синхронизация активна' : 'Firebase · Соединение восстанавливается'
+  const openNotifications = () => { setSeen(Date.now()); setModal('notifications') }
+
+  if (loading) return <Loading />
+  if (!session) return <Login startupError={error} onLogin={value => {
+    setSeen(Date.now())
+    setSession(value)
+    setPreferences(loadPreferences(value.userId))
+    navigate({page: 'home'}, true)
+  }} />
+
+  if (active?.active === false) return <main className="main-page app-shell"><h1>Доступ приостановлен</h1><p className="sheet-note">Обратитесь к администратору заведения.</p><button className="secondary" onClick={() => void logout()}>Выйти</button></main>
+
+  const tab = tabs.find(item => item.page === screen.page)?.page as Tab | undefined
+  const withNav = !admin && !!tab
+  const orderView = screen.page === 'orders' || screen.page === 'tables' || screen.page === 'order' || screen.page === 'catalog'
+  const showOrders = orderView && (!admin || screen.page === 'order' || screen.page === 'catalog')
+  return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`} onPointerDown={preferences.sound ? unlockSound : undefined}>
+    {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
+    {admin ? <div hidden={showOrders}>
+      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} mode={store.mode} /></Suspense>
+    </div> :
+      <>
+        {screen.page === 'home' && <Home state={state} user={session} now={now} connection={connection} connected={connected}
+          notify={openNotifications} unread={visibleNotices.some(notice => notice.at > seen) || alerts.length > 0}
+          showConnection={preferences.connection} openOrder={openOrder} quick={() => setModal('quick')} />}
+        {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
+        {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
+          navigate={view => navigate({page: 'profile', view})} preferences={preferences} setPreference={updatePreference}
+          connection={connection} period={period} setPeriod={setPeriod} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
+      </>}
+    {(!admin || showOrders) && <div hidden={!showOrders}>
+      <Orders state={state} user={session} execute={execute} screen={orderView ? screen : {page: 'orders'}} navigate={orderNavigate} openQuick={() => setModal('quick')} />
+    </div>}
+    {withNav && <nav className="bottom-nav" aria-label="Основная навигация">
+      {tabs.map(({ page, title, Icon }) => <button type="button" key={page} aria-current={tab === page ? 'page' : undefined} onClick={() => {
+        if (tab !== page || (screen.page === 'profile' && screen.view !== 'profile')) navigate({page})
+      }}><Icon size={21} strokeWidth={tab === page ? 2.4 : 1.8} /><span>{title}</span></button>)}
+    </nav>}
+    {modal === 'quick' && <Sheet title="Быстрые действия" className="quick-sheet" onClose={() => setModal(undefined)}>
+      <div className="quick-list panel">
+        <ActionRow icon={<Plus size={19} />} label="Новый заказ" onClick={() => navigate({page: 'tables'})} />
+        <ActionRow icon={<Armchair size={19} />} label="Выбрать стол" onClick={() => navigate({page: 'tables'})} />
+        <ActionRow icon={<FilePlus2 size={19} />} label="Создать таб" onClick={() => navigate({page: 'tables', initialTab: true})} />
+        <ActionRow icon={<Ban size={19} />} label="Стоп-лист" onClick={() => navigate({page: 'stock'})} />
+      </div>
+    </Sheet>}
+    {modal === 'notifications' && <Sheet title="Уведомления" onClose={() => setModal(undefined)}>
+      <div className="notice-list">
+        {alerts.map(alert => <ActionRow key={`alert-${alert.orderId}`} icon={<Bell size={17} />}
+          label={orderTitle(state.orders[alert.orderId])} detail={alert.reason} onClick={() => openOrder(alert.orderId)} />)}
+        {visibleNotices.slice(0, 25).map(notice => {
+          const timestamp = new Date(notice.at).toLocaleString('ru-RU', {dateStyle: 'short', timeStyle: 'short'})
+          const onClick = notice.orderId ? () => openOrder(notice.orderId!) : notice.productId ? () => navigate({page: 'stock'}) : undefined
+          return onClick ? <ActionRow key={notice.id} icon={<Bell size={17} />} label={notice.message} detail={timestamp} onClick={onClick} />
+            : <div key={notice.id} className="metric panel"><span>{notice.message}</span><small>{timestamp}</small></div>
+        })}
+        {alerts.length + visibleNotices.length === 0 && <Empty icon={<Bell size={22} />} title="Уведомлений нет" />}
+      </div>
+    </Sheet>}
+    {toast && !modal && <div className="toast" role="status"><span>{toast}</span><IconButton label="Закрыть уведомление" onClick={() => setToast('')}><X size={16} /></IconButton></div>}
+  </div>
+}
