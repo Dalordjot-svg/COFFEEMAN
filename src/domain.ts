@@ -39,7 +39,7 @@ export type State = {
   venueResetAt?: number
   dayClosedAt?: number
   dayOpenedAt?: number
-  dayReports?: Record<string, {at:number; from:number; revenue:number; count:number; actorId:string}>
+  dayReports?: Record<string, {at:number; from:number; revenue:number; count:number; actorId:string; emergency?:boolean; unfinishedIds?:string[]}>
   users: Record<string, User>
   devices: Record<string, Device>
   categories: Record<string, Category>
@@ -58,6 +58,7 @@ export type State = {
 
 export type Command =
   | { type: 'closeDay' | 'openDay' }
+  | { type: 'emergencyCloseDay'; pin: string }
   | { type: 'registerUser' }
   | { type: 'createOrder'; orderId: string; tableId?: string; tabName?: string; guestCount: number }
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
@@ -561,7 +562,7 @@ function stockUpdates(before: State, after: State, stamp: Stamp, ids: Set<string
 }
 
 const adminCommands: ReadonlySet<Command['type']> = new Set([
-  'closeDay', 'openDay', 'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearCatalog',
+  'closeDay', 'openDay', 'emergencyCloseDay', 'saveProduct', 'saveCategory', 'saveModifier', 'saveHall', 'saveTable', 'updateUser', 'assignOrder', 'saveSettings', 'importMenu', 'clearCatalog',
 ])
 
 function importEntityId(record: Record<string, unknown>, operationId: string, position: number) {
@@ -606,12 +607,15 @@ export function applyCommand(previous: State, session: Session, command: Command
         createdAt: device?.createdAt ?? stamp.now, lastSeenAt: stamp.now }
       break
     }
+    case 'emergencyCloseDay':
     case 'closeDay': {
       requireCondition(!state.dayClosedAt || (state.dayOpenedAt ?? 0) > state.dayClosedAt, 'День уже закрыт')
-      requireCondition(!entries(state.orders).some(isActiveOrder), 'Сначала завершите или отмените все открытые заказы')
+      const unfinishedIds = entries(state.orders).filter(isActiveOrder).map(o=>o.id)
+      if(command.type==='emergencyCloseDay') requireCondition(command.pin==='1111','Неверный PIN')
+      else requireCondition(!unfinishedIds.length, 'Сначала завершите или отмените все открытые заказы')
       const from = state.dayOpenedAt ?? state.dayClosedAt ?? new Date(stamp.now).setHours(0,0,0,0)
       const paid = entries(state.orders).filter(o => o.closedAt !== undefined && o.closedAt >= from && o.closedAt <= stamp.now && !o.canceledAt)
-      state.dayReports = {...state.dayReports, [stamp.id]: {at:stamp.now,from,revenue:paid.reduce((sum,o)=>sum+orderTotal(o),0),count:paid.length,actorId:session.userId}}
+      state.dayReports = {...state.dayReports, [stamp.id]: {at:stamp.now,from,revenue:paid.reduce((sum,o)=>sum+orderTotal(o),0),count:paid.length,actorId:session.userId,...(command.type==='emergencyCloseDay'?{emergency:true,unfinishedIds}:{})}}
       state.dayClosedAt = stamp.now
       break
     }

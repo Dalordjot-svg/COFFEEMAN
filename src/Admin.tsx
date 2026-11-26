@@ -70,6 +70,7 @@ const fieldNumber = (data: FormData, name: string) => Number(data.get(name))
 const colorValue = (color: string | undefined) => color && /^#[a-f0-9]{6}$/i.test(color) ? color : '#357afe'
 
 const auditNames: Record<string, string> = {
+  emergencyCloseDay: 'Аварийное закрытие дня',
   closeDay: 'Закрытие дня',
   openDay: 'Открытие дня',
   registerUser: 'Вход сотрудника',
@@ -828,6 +829,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'orders' && <ListFilter className="admin-heading-icon" aria-hidden="true" size={21} />}
       </header>
       <div className="admin-page" key={page}>
+        {page === 'overview' && <div style={{display:'grid',gap:8,marginBottom:12}}><button className="admin-add" onClick={()=>navigate('reports')}>Отчёты и закрытие дня</button><button className="admin-add" style={{color:'#ff7777'}} onClick={()=>navigate('reports')}>Аварийные операции</button></div>}
         {page === 'overview' && <Overview state={state} open={setDialog} navigate={navigate} />}
         {page === 'catalog' && <Catalog state={state} open={setDialog} execute={execute} />}
         {page === 'floor' && <Floor state={state} open={setDialog} />}
@@ -866,9 +868,11 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
 
 function DayReports({state,execute}: Pick<Props,'state'|'execute'>) {
  const [confirm,setConfirm]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [emergency,setEmergency]=useState(false),[pin,setPin]=useState('');
+ const emergencyRun=async()=>{setBusy(true);setError('');try{await execute({type:'emergencyCloseDay',pin});setEmergency(false);setPin('')}catch(e){setError(message(e))}finally{setBusy(false)}};
  const closed=Boolean(state.dayClosedAt && (state.dayOpenedAt??0)<=state.dayClosedAt), active=entries(state.orders).filter(isActiveOrder).length;
  const from=state.dayOpenedAt??state.dayClosedAt??new Date().setHours(0,0,0,0);
  const paid=entries(state.orders).filter(o=>o.closedAt!==undefined && o.closedAt>=from && !o.canceledAt);
  const run=async()=>{setBusy(true);setError('');try{await execute({type:closed?'openDay':'closeDay'});setConfirm(false)}catch(e){setError(message(e))}finally{setBusy(false)}};
- return <section className="admin-report"><h2>{closed?'День закрыт':'Текущий рабочий день'}</h2>{!closed&&<><p>Выручка по закрытым заказам: <strong>{rubles.format(paid.reduce((s,o)=>s+orderTotal(o),0))}</strong></p><p>Закрытых заказов: {paid.length} · Активных: {active}</p></>}{!closed&&active>0&&<p>Завершите все активные заказы перед закрытием дня.</p>}<button type="button" disabled={busy||(!closed&&active>0)} onClick={()=>closed?void run():setConfirm(true)}>{closed?'Открыть новый день':'Закрыть день'}</button>{confirm&&!closed&&<><p>Подтвердите закрытие дня. История сохранится, новые заказы будут заблокированы.</p><button disabled={busy} onClick={()=>void run()}>Подтвердить закрытие</button><button onClick={()=>setConfirm(false)}>Отмена</button></>}{error&&<p role="alert">{error}</p>}<h2>История отчётов</h2>{Object.values(state.dayReports??{}).sort((a,b)=>b.at-a.at).map(report=><article key={report.at}><strong>{formatTime(report.at)}</strong><p>{rubles.format(report.revenue)} · {report.count} заказов</p></article>)}</section>
+ return <section className="admin-report"><h2>{closed?'День закрыт':'Текущий рабочий день'}</h2>{!closed&&<><p>Выручка по закрытым заказам: <strong>{rubles.format(paid.reduce((s,o)=>s+orderTotal(o),0))}</strong></p><p>Закрытых заказов: {paid.length} · Активных: {active}</p></>}{!closed&&active>0&&<p>Завершите все активные заказы перед закрытием дня.</p>}<button type="button" disabled={busy||(!closed&&active>0)} onClick={()=>closed?void run():setConfirm(true)}>{closed?'Открыть новый день':'Закрыть день'}</button>{confirm&&!closed&&<><p>Подтвердите закрытие дня. История сохранится, новые заказы будут заблокированы.</p><button disabled={busy} onClick={()=>void run()}>Подтвердить закрытие</button><button onClick={()=>setConfirm(false)}>Отмена</button></>}{error&&<p role="alert">{error}</p>}{!closed&&<div style={{display:'grid',gap:8,margin:'20px 0'}}><h2>Аварийные операции</h2><button className="admin-add" style={{color:'#ff7777'}} onClick={()=>setEmergency(!emergency)}>Досрочно закрыть день</button>{emergency&&<><p>Открытые заказы сохранятся неоплаченными. Новые заказы будут заблокированы.</p><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value)} placeholder="PIN-код" aria-label="PIN-код"/><button className="admin-add" style={{color:'#ff7777'}} disabled={busy||pin.length!==4} onClick={()=>void emergencyRun()}>Подтвердить аварийное закрытие</button><button className="admin-add" onClick={()=>{setEmergency(false);setPin('')}}>Отмена</button></>}</div>}<h2>История отчётов</h2>{Object.values(state.dayReports??{}).sort((a,b)=>b.at-a.at).map(report=><article key={report.at}><strong>{formatTime(report.at)}</strong><p>{rubles.format(report.revenue)} · {report.count} заказов</p>{report.emergency&&<p>Аварийное закрытие · незавершённых: {report.unfinishedIds?.length??0}</p>}</article>)}</section>
 }
