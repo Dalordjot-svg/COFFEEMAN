@@ -54,10 +54,11 @@ describe('импорт меню', () => {
       { name: 'Раф   ореховый', category: 'Кофе', price: 250 },
       { name: 'РАФ ореховый', category: 'Кофе', price: 300 },
     ], [{ name: 'кофе', color: '#ffffff' }, { name: 'Соусы' }])
-    expect(previewMenuImport(before, data)).toMatchObject({ categoryCount: 0, productCount: 2, skippedCount: 4 })
+    expect(previewMenuImport(before, data)).toMatchObject({ categoryCount: 0, productCount: 3, skippedCount: 3 })
 
     const result = importMenu(before, data)
     expect(result.products.latte).toEqual(before.products.latte)
+    expect(entries(result.products).filter(p => !p.archived && p.name.toLowerCase() === 'латте')).toHaveLength(1)
     expect(result.categories.coffee).toEqual(before.categories.coffee)
     expect(result.categories.sauces.archived).toBe(true)
     expect(entries(result.products).filter(product => product.name.trim().toLowerCase() === 'чизкейк')).toHaveLength(2)
