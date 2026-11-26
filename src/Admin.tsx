@@ -316,7 +316,7 @@ function MenuImport({ state, execute }: { state: State; execute: Props['execute'
     }}>Проверить меню</button>
     {(invalid || failure) && <p role="alert" className="admin-error">{invalid || failure}</p>}
     {result && <div className="admin-import-result">
-      {imported && <p className="admin-success" role="status"><Check size={17} />Меню импортировано</p>}
+      {imported && <p className="admin-success" role="status"><Check size={17} />Меню добавлено. В облачном режиме изменения отправляются в Firebase через очередь синхронизации.</p>}
       <p className="admin-hint">Проверка перед импортом</p>
       <Metrics items={[
         { label: 'Категории', value: result.categoryCount },
@@ -325,6 +325,7 @@ function MenuImport({ state, execute }: { state: State; execute: Props['execute'
       ]} />
       {result.warnings.length > 0 && <ul className="admin-import-warnings">{result.warnings.map((warning, index) =>
         <li key={index}>{warning}</li>)}</ul>}
+      {!imported && !result.categoryCount && !result.productCount && <p role="status" className="admin-hint">Нет новых позиций: все товары уже существуют или их категории архивированы. Проверьте предупреждения выше.</p>}
       {!imported && <button type="button" className="primary" disabled={working || (!result.categoryCount && !result.productCount)}
         onClick={() => void submitImport()}>{working ? 'Импорт…' : 'Импортировать'}</button>}
     </div>}

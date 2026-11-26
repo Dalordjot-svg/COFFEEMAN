@@ -108,7 +108,7 @@ export function buildMenuImport(state: State, text: string) {
   const productKey = (categoryKey: string, name: string) => JSON.stringify([categoryKey, nameKey(name)])
   for (const product of Object.values(state.products)) {
     const categoryKey = knownCategoryKeys.get(product.categoryId)
-    if (categoryKey !== undefined) productKeys.add(productKey(categoryKey, product.name))
+    if (!product.archived && categoryKey !== undefined) productKeys.add(productKey(categoryKey, product.name))
   }
 
   for (const [index, value] of source.categories.entries()) {

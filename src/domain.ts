@@ -758,7 +758,7 @@ export function applyCommand(previous: State, session: Session, command: Command
         if (order.precheckAt !== undefined) return previous
         order.precheckAt = stamp.now
       } else {
-        requireCondition(order.precheckAt !== undefined, 'Сначала оформите предчек')
+        requireCondition(order.precheckAt !== undefined || items.every(item => item.status === 'served'), 'Выдайте все позиции или оформите предчек')
         for (const item of items) {
           if (item.status === 'served') continue
           inventoryMovement(state, stamp, order, item, 'serve')
