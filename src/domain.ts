@@ -7,7 +7,7 @@ export type Device = { id: string; userId: string; createdAt: number; lastSeenAt
 export type Category = { id: string; name: string; color: string; sort: number; archived?: boolean }
 export type Hall = { id: string; name: string; sort: number; archived?: boolean }
 export type Table = { id: string; name: string; hallId: string; capacity: number; sort: number; waiterId?: string; archived?: boolean }
-export type PriceOption = { id: string; name: string; price: number }
+export type PriceOption = { id: string; name: string; price: number; availabilityProduct?: string }
 export type Modifier = { id: string; name: string; required?: boolean; multiple?: boolean; options: PriceOption[] }
 export type Product = {
   id: string; name: string; categoryId: string; price: number; available: boolean; sort: number
@@ -444,7 +444,7 @@ function selection(state: State, product: Product, sizeId?: string, optionIds: s
   requireCondition(desired.size === optionIds.length, 'Модификатор уже добавлен')
   const selected: PriceOption[] = []
   for (const modifier of modifiers) {
-    const options = modifier.options.filter(option => desired.has(option.id))
+    const options = modifier.options.filter(option => desired.has(option.id) && (!option.availabilityProduct || Object.values(state.products).some(p => p.name === option.availabilityProduct && p.available && !p.archived)))
     requireCondition(!modifier.required || options.length, `Выберите «${modifier.name}»`)
     requireCondition(modifier.multiple || options.length <= 1, `Выберите один вариант «${modifier.name}»`)
     selected.push(...options)
@@ -953,6 +953,7 @@ export function applyCommand(previous: State, session: Session, command: Command
         state.categories[id] = { id, name, color, sort: Math.min(99_999, categorySort + index) }
         plan.categoryIds.set(key, id)
       })
+      for (const modifier of plan.modifiers) state.modifiers[modifier.id] = modifier
       const productSort = nextSort(entries(state.products))
       plan.products.forEach(({ categoryKey, inventory, ...product }, index) => {
         const categoryId = plan.categoryIds.get(categoryKey)

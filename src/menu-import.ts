@@ -1,10 +1,10 @@
-import type { State } from './domain'
+import type { State, Modifier, PriceOption } from './domain'
 
 type Row = Record<string, unknown>
 type MenuCategory = { name: string; key: string; color: string }
 type MenuProduct = {
   name: string; categoryKey: string; price: number; available: boolean
-  cost?: number; description?: string; volume?: string; imageUrl?: string; inventory?: { quantity: number | null; min?: number }
+  sizes?: PriceOption[]; modifierIds?: string[]; cost?: number; description?: string; volume?: string; imageUrl?: string; inventory?: { quantity: number | null; min?: number }
 }
 
 export type MenuImportPreview = { categoryCount: number; productCount: number; skippedCount: number; warnings: string[] }
@@ -85,15 +85,19 @@ function parse(text: string) {
     throw new MenuImportError('Не удалось прочитать JSON. Проверьте кавычки, запятые и скобки')
   }
   const payload = row(data, 'Меню')
-  checkFields(payload, ['categories', 'products'], 'Меню')
+  checkFields(payload, ['categories', 'products', 'modifiers'], 'Меню')
   const categories = list(payload.categories ?? [], 'Категории')
   const products = list(payload.products ?? [], 'Товары')
   if (!categories.length && !products.length) throw new MenuImportError('Добавьте хотя бы одну категорию или товар')
-  return { categories, products }
+  return { categories, products, modifiers: list(payload.modifiers ?? [], 'Модификаторы') }
 }
 
 export function buildMenuImport(state: State, text: string) {
   const source = parse(text)
+  const modifiers: Modifier[] = []
+  const modifierIds = new Map(Object.values(state.modifiers).map(g => [nameKey(g.name), g.id]))
+  const options = (value: unknown, label: string): PriceOption[] => list(value, label).map((v,i) => { const f = row(v,label); checkFields(f,['name','price','availabilityProduct'],label); return {id: `import-option-${i}`,name:string(f.name,label,80),price:whole(f.price,label), ...(f.availabilityProduct === undefined ? {} : {availabilityProduct:string(f.availabilityProduct,label,120)})} })
+  for (const [i,v] of source.modifiers.entries()) { const f = row(v,'Модификатор'); checkFields(f,['name','required','multiple','options','customOption'],'Модификатор'); const name=string(f.name,'Модификатор',80); const id=modifierIds.get(nameKey(name)) ?? `import-modifier-${i}-${encodeURIComponent(name).replace(/%/g,'').slice(0,60)}`; modifierIds.set(nameKey(name),id); modifiers.push({id,name,required:f.required===true,multiple:f.multiple===true,options:options(f.options,'Варианты').map((o,j)=>({...o,id:`${id}-${j}`}))}) }
   const declared = new Map<string, MenuCategory>()
   const archivedCategories = new Set<string>()
   const categoryIds = new Map<string, string>()
@@ -128,7 +132,7 @@ export function buildMenuImport(state: State, text: string) {
   for (const [index, value] of source.products.entries()) {
     const label = `Товар №${index + 1}`
     const fields = row(value, label)
-    checkFields(fields, ['name', 'category', 'price', 'cost', 'description', 'volume', 'imageUrl', 'quantity', 'min', 'available'], label)
+    checkFields(fields, ['name', 'category', 'price', 'cost', 'description', 'volume', 'imageUrl', 'quantity', 'min', 'available', 'sizes', 'modifiers'], label)
     const name = string(fields.name, `${label}, name`, 120)
     const category = string(fields.category, `${label}, category`, 80)
     const categoryKey = nameKey(category)
@@ -163,6 +167,8 @@ export function buildMenuImport(state: State, text: string) {
       declared.set(categoryKey, { name: category, key: categoryKey, color: DEFAULT_COLOR })
     }
     products.push({
+      ...(fields.sizes === undefined ? {} : {sizes:options(fields.sizes,label)}),
+      ...(fields.modifiers === undefined ? {} : {modifierIds:list(fields.modifiers,label).map(v=>{const id=modifierIds.get(nameKey(string(v,label,80))); if(!id) throw new MenuImportError(`${label}: неизвестная группа добавок`); return id})}),
       name, categoryKey, price: Math.round(price * 100) / 100, available,
       ...(cost === undefined ? {} : { cost: Math.round(cost * 100) / 100 }),
       ...(description ? { description } : {}), ...(volume ? { volume } : {}), ...(imageUrl ? { imageUrl } : {}),
@@ -172,7 +178,7 @@ export function buildMenuImport(state: State, text: string) {
   if (declared.size > MAX_ROWS) throw new MenuImportError(`За один импорт можно указать не более ${MAX_ROWS} категорий`)
   const categories = [...declared.values()].filter(category => !categoryIds.has(category.key) && !archivedCategories.has(category.key))
   return {
-    categories, categoryIds, products,
+    categories, categoryIds, products, modifiers,
     preview: { categoryCount: categories.length, productCount: products.length, skippedCount, warnings } satisfies MenuImportPreview,
   }
 }
