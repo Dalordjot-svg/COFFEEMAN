@@ -57,8 +57,8 @@ export type Command =
   | { type: 'registerUser' }
   | { type: 'createOrder'; orderId: string; tableId?: string; tabName?: string; guestCount: number }
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
-  | { type: 'addItem'; orderId: string; guestId: string; itemId: string; productId: string; quantity: number; sizeId?: string; optionIds?: string[]; comment?: string }
-  | { type: 'editItem'; orderId: string; itemId: string; guestId?: string; quantity?: number; sizeId?: string; optionIds?: string[]; comment?: string }
+  | { type: 'addItem'; orderId: string; guestId: string; itemId: string; productId: string; quantity: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
+  | { type: 'editItem'; orderId: string; itemId: string; guestId?: string; quantity?: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
   | { type: 'cancelItem' | 'readyItem' | 'serveItem' | 'unreadyItem'; orderId: string; itemId: string }
   | { type: 'sendOrder' | 'precheckOrder' | 'closeOrder' | 'cancelOrder' | 'reopenOrder' | 'readyOrder'; orderId: string }
   | ({ type: 'updateInventory'; productId: string; available?: boolean } & InventoryInput)
@@ -434,7 +434,7 @@ function sellableProduct(state: State, productId: string, quantity: number): Pro
   return product
 }
 
-function selection(state: State, product: Product, sizeId?: string, optionIds: string[] = []) {
+function selection(state: State, product: Product, sizeId?: string, optionIds: string[] = [], customSyrup = '') {
   const sizes = product.sizes ?? []
   const size = sizes.find(row => row.id === sizeId)
   requireCondition((!sizes.length && sizeId === undefined) || size, 'Выберите доступный размер')
@@ -450,12 +450,16 @@ function selection(state: State, product: Product, sizeId?: string, optionIds: s
     selected.push(...options)
   }
   requireCondition(selected.length === desired.size, 'Выбранный модификатор недоступен')
-  const unitPrice = (cents(size?.price ?? product.price) + selected.reduce((total, option) => total + cents(option.price), 0)) / 100
+  const syrup = checkText(customSyrup, 'название сиропа', 80, true)
+  if (syrup) {
+    requireCondition(modifiers.some(group => /сироп/i.test(group.name)), 'Сиропы недоступны для этого товара')
+  }
+  const unitPrice = (cents(size?.price ?? product.price) + selected.reduce((total, option) => total + cents(option.price), 0) + (syrup ? 6000 : 0)) / 100
   return {
     unitPrice,
     ...(size ? { sizeId: size.id, sizeName: size.name } : {}),
     optionIds: selected.map(option => option.id),
-    options: selected.map(option => ({ name: option.name, price: option.price })),
+    options: [...selected.map(option => ({ name: option.name, price: option.price })), ...(syrup ? [{name: 'Свой сироп: ' + syrup, price: 60}] : [])],
   }
 }
 
@@ -644,7 +648,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       const comment = command.comment === undefined ? '' : checkText(command.comment, 'комментарий', 500, true)
       order.items[command.itemId] = {
         id: command.itemId, guestId: command.guestId, productId: product.id, name: product.name, quantity,
-        ...selection(state, product, command.sizeId, command.optionIds),
+        ...selection(state, product, command.sizeId, command.optionIds, command.customSyrup),
         ...(comment ? { comment } : {}), status: 'draft', createdAt: stamp.now,
       }
       orderId = order.id
@@ -659,7 +663,7 @@ export function applyCommand(previous: State, session: Session, command: Command
         guestIn(order, command.guestId)
         item.guestId = command.guestId
       }
-      const changeSelection = command.sizeId !== undefined || command.optionIds !== undefined
+      const changeSelection = command.sizeId !== undefined || command.optionIds !== undefined || command.customSyrup !== undefined
       const quantityChanged = command.quantity !== undefined && command.quantity !== item.quantity
       if (quantityChanged || changeSelection || command.comment !== undefined) {
         const reserved = item.status !== 'draft'
@@ -669,7 +673,7 @@ export function applyCommand(previous: State, session: Session, command: Command
           const product = sellableProduct(state, item.productId, reserved && !quantityChanged ? 0 : quantity)
           item.quantity = quantity
           if (changeSelection) {
-            const selected = selection(state, product, command.sizeId ?? item.sizeId, command.optionIds ?? item.optionIds)
+            const selected = selection(state, product, command.sizeId ?? item.sizeId, command.optionIds ?? item.optionIds, command.customSyrup ?? item.options.find(option => option.name.startsWith('Свой сироп: '))?.name.slice(12) ?? '')
             delete item.sizeId
             delete item.sizeName
             Object.assign(item, selected)

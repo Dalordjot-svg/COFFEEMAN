@@ -29,6 +29,7 @@ type ItemDetails = {
   quantity: number;
   sizeId?: string;
   optionIds: string[];
+  customSyrup?: string;
   comment: string;
   guestId: string;
 };
@@ -794,6 +795,8 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
   const [options, setOptions] = useState(item?.optionIds ?? []);
   const [quantity, setQuantity] = useState(item?.quantity ?? 1);
   const [comment, setComment] = useState(item?.comment ?? '');
+  const [customSyrup,setCustomSyrup] = useState(item?.options.find(option => option.name.startsWith('Свой сироп: '))?.name.slice(12) ?? '');
+  const [showCustomSyrup,setShowCustomSyrup] = useState(Boolean(customSyrup));
   const [destination, setDestination] = useState(guestId);
   const [expanded, setExpanded] = useState<string | null>(null);
   const controlsId = useId();
@@ -801,11 +804,11 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
   const allOptions = groups.flatMap((group) => group.options);
   const chosenOptions = allOptions.filter((option) => options.includes(option.id));
   const selectedPrice = size?.price ?? product.price;
-  const extraPrice = chosenOptions.reduce((sum, option) => sum + option.price, 0);
+  const extraPrice = chosenOptions.reduce((sum, option) => sum + option.price, 0) + (showCustomSyrup && customSyrup.trim() ? 60 : 0);
   const stock = availableQuantity(state, product.id);
   const available = stock === null ? null : stock + (item && item.status !== 'draft' ? item.quantity : 0);
   const canOrder = Boolean(item) || stockStatus(state, product.id) !== 'out';
-  const canSave = canOrder && groups.every((group) => !group.required || group.options.some((option) => options.includes(option.id)))
+  const canSave = (!showCustomSyrup || Boolean(customSyrup.trim())) && canOrder && groups.every((group) => !group.required || group.options.some((option) => options.includes(option.id)))
     && (available === null || quantity <= available) && (!sizes.length || Boolean(size));
   const toggleOptions = (key: string) => setExpanded((current) => current === key ? null : key);
   const chooseOption = (group: typeof groups[number], optionId: string) => {
@@ -822,7 +825,7 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
     <form className="order-sheet-content order-product-form" onSubmit={(event) => {
       event.preventDefault();
       if (canSave && !busy) void submit({
-        quantity, ...(sizeId ? { sizeId } : {}), optionIds: chosenOptions.map((option) => option.id), comment: comment.trim(), guestId: destination,
+        quantity, ...(sizeId ? { sizeId } : {}), optionIds: chosenOptions.map((option) => option.id), customSyrup: showCustomSyrup ? customSyrup.trim() : '', comment: comment.trim(), guestId: destination,
       });
     }}>
       <div className="order-product-preview">
@@ -874,6 +877,7 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
           })}
         </div>
       </div>}
+      {groups.some(group => /сироп/i.test(group.name)) && <div className="order-config"><button type="button" className="order-config-row" onClick={() => setShowCustomSyrup(v => !v)} aria-expanded={showCustomSyrup}><span>{showCustomSyrup ? 'Убрать свой сироп' : '+ Свой сироп'}</span><small>60 ₽</small></button>{showCustomSyrup && <label className="order-field">Название сиропа<input value={customSyrup} maxLength={80} onChange={e=>setCustomSyrup(e.target.value)} placeholder="Введите вкус" /></label>}</div>}
       {item && order.guestIds.length > 1 && <label className="order-field">
         Гость
         <select aria-label="Гость" value={destination} onChange={(event) => setDestination(event.target.value)}>
