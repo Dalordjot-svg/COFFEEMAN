@@ -90,6 +90,16 @@ export function createFirebaseStore(): Store {
  const key = 'coffeeman.cloud.session.v2'
  let session: Session | null = null
  let connected = false
+ type Pending = {actor:Session;command:Command;id:string;now:number}
+ const queueKey='coffeeman.pending.v1'
+ let queue:Pending[] = JSON.parse(localStorage.getItem(queueKey) || '[]')
+ let base=emptyState(), loaded=false, flushing=false
+ const listeners=new Set<(state:ReturnType<typeof emptyState>)=>void>()
+ function persist(){localStorage.setItem(queueKey,JSON.stringify(queue))}
+ function projected(){let state=base;for(const p of queue){try{state=applyCommand(state,p.actor,p.command,{id:p.id,now:p.now})}catch{/* server conflict is reported during flush */}}return state}
+ function publish(){for(const listener of listeners)listener(projected())}
+ async function flush(){if(flushing||!connected||!queue.length)return;flushing=true;try{while(queue.length&&connected){const p=queue[0];try{await change(raw=>merge(raw,applyCommand(stateOf(raw),p.actor,p.command,{id:p.id,now:p.now})),p.id);base=normalizeState((await get(root)).val());queue.shift();persist();publish()}catch{break}}}finally{flushing=false}}
+ window.setInterval(()=>{void flush()},10000)
  const alias = (name: string) => name.normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU')
  async function change(transform: (raw: unknown) => unknown, operationId: string) {
  const warn = (code: string) => window.dispatchEvent(new CustomEvent('coffeeman-sync-error',{detail:{code,operationId}}))
@@ -106,7 +116,7 @@ export function createFirebaseStore(): Store {
  function merge(raw: unknown, next: ReturnType<typeof stateOf>) { return JSON.parse(JSON.stringify({...((raw ?? {}) as object),...next})) }
  return {
  mode:'firebase',
- subscribe(listener,onError) { return onValue(root,s=>listener(normalizeState(s.val())),e=>onError?.(asError(e))) },
+ subscribe(listener,onError) { listeners.add(listener);if(loaded)listener(projected());const detach=onValue(root,s=>{base=normalizeState(s.val());loaded=true;publish()},e=>onError?.(asError(e)));return ()=>{listeners.delete(listener);detach()} },
  subscribeConnection(listener) {
  const stop = connectionSubscribe(listener,()=>!navigator.onLine?'offline':connected?'online':'connecting')
  const detach=onValue(ref(database,'.info/connected'),s=>{connected=s.val()===true;listener(connected?'online':'offline')},()=>listener('offline'))
@@ -148,7 +158,9 @@ export function createFirebaseStore(): Store {
  const actor=session
  if(!actor)throw new Error('Сначала войдите в систему')
  const now=Date.now()
- await change(raw=>merge(raw,applyCommand(stateOf(raw),actor,command,{id:operationId,now})),operationId)
+ if(!loaded)throw new Error('Дождитесь загрузки данных')
+ applyCommand(projected(),actor,command,{id:operationId,now})
+ queue.push({actor,command,id:operationId,now});try{persist()}catch(e){queue.pop();throw e}publish()
  }
  }
 }

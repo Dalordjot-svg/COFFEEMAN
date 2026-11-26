@@ -512,7 +512,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
     }
   }
 
-  const itemAction = async (type: 'cancelItem' | 'readyItem' | 'serveItem', itemId: string) => {
+  const itemAction = async (type: 'cancelItem' | 'readyItem' | 'serveItem' | 'unreadyItem', itemId: string) => {
     if (await mutation.perform({ type, orderId: order.id, itemId })) {
       if (type !== 'readyItem') closeMenu();
     }
@@ -523,12 +523,12 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
     if (previous) clearTimeout(previous.timer);
     tap.current = null;
     mutation.clearError();
-    if (!editable || item.status !== 'ready' || keyboard) {
+    if (!editable || !['ready','preparing'].includes(item.status) || keyboard) {
       setSelectedItem(item.id);
       return;
     }
     if (previous?.id === item.id) {
-      void itemAction('serveItem', item.id);
+      void itemAction(item.status === 'ready' ? 'unreadyItem' : 'readyItem', item.id);
       return;
     }
     tap.current = { id: item.id, timer: setTimeout(() => {
@@ -586,7 +586,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
         {action && <button type="button" className="primary" disabled={mutation.busy} onClick={action.execute}>{action.icon}{action.label}</button>}
       </div>
       {selected && <OrderSheet title={selected.name} locked={mutation.busy} onClose={closeMenu}>
-        {editable && selected.status === 'draft' && state.products[selected.productId] ? <ProductForm
+        {editable && !order.precheckAt && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm
           product={state.products[selected.productId]} state={state} order={order} guestId={selected.guestId} item={selected}
           busy={mutation.busy} error={mutation.error}
           submit={async (details) => {
@@ -719,14 +719,7 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
 
   const chooseProduct = async (entry: Product) => {
     mutation.clearError();
-    if (entry.sizes?.length || entry.modifierIds?.length) {
-      setProductId(entry.id);
-      return;
-    }
-    const result = await mutation.perform({
-      type: 'addItem', orderId: order.id, guestId: screen.guestId, itemId: newId(), productId: entry.id, quantity: 1,
-    });
-    if (result) setAdded(entry.name + ' · добавлено');
+    setProductId(entry.id);
   };
 
   return (
@@ -807,8 +800,9 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
   const chosenOptions = allOptions.filter((option) => options.includes(option.id));
   const selectedPrice = size?.price ?? product.price;
   const extraPrice = chosenOptions.reduce((sum, option) => sum + option.price, 0);
-  const available = availableQuantity(state, product.id);
-  const canOrder = stockStatus(state, product.id) !== 'out';
+  const stock = availableQuantity(state, product.id);
+  const available = stock === null ? null : stock + (item && item.status !== 'draft' ? item.quantity : 0);
+  const canOrder = Boolean(item) || stockStatus(state, product.id) !== 'out';
   const canSave = canOrder && groups.every((group) => !group.required || group.options.some((option) => options.includes(option.id)))
     && (available === null || quantity <= available) && (!sizes.length || Boolean(size));
   const toggleOptions = (key: string) => setExpanded((current) => current === key ? null : key);
@@ -890,7 +884,7 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
       {!canOrder && <p className="order-sheet-caption order-danger">Позиция в стоп-листе</p>}
       <FormError text={error} />
       <div className="order-product-actions">
-        <button type="submit" className="primary" disabled={busy || !canSave}>{item ? 'Сохранить' : 'Добавить'} — {formatCurrency((selectedPrice + extraPrice) * quantity)}</button>
+        <button type="submit" className="primary" disabled={busy || !canSave}>{item ? 'Сохранить' : comment.trim() ? 'Добавить с комментарием' : 'Без комментария'} — {formatCurrency((selectedPrice + extraPrice) * quantity)}</button>
         {remove && <button type="button" className="secondary order-danger" disabled={busy} onClick={remove}>Удалить позицию</button>}
       </div>
     </form>

@@ -59,7 +59,7 @@ export type Command =
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
   | { type: 'addItem'; orderId: string; guestId: string; itemId: string; productId: string; quantity: number; sizeId?: string; optionIds?: string[]; comment?: string }
   | { type: 'editItem'; orderId: string; itemId: string; guestId?: string; quantity?: number; sizeId?: string; optionIds?: string[]; comment?: string }
-  | { type: 'cancelItem' | 'readyItem' | 'serveItem'; orderId: string; itemId: string }
+  | { type: 'cancelItem' | 'readyItem' | 'serveItem' | 'unreadyItem'; orderId: string; itemId: string }
   | { type: 'sendOrder' | 'precheckOrder' | 'closeOrder' | 'cancelOrder' | 'reopenOrder' | 'readyOrder'; orderId: string }
   | ({ type: 'updateInventory'; productId: string; available?: boolean } & InventoryInput)
   | { type: 'saveProduct'; product: Product; inventory?: InventoryInput; modifiers?: Modifier[]; preserveAvailability?: boolean }
@@ -662,10 +662,11 @@ export function applyCommand(previous: State, session: Session, command: Command
       const changeSelection = command.sizeId !== undefined || command.optionIds !== undefined
       const quantityChanged = command.quantity !== undefined && command.quantity !== item.quantity
       if (quantityChanged || changeSelection || command.comment !== undefined) {
-        requireCondition(item.status === 'draft', 'После отправки можно только переместить позицию к другому гостю')
+        const reserved = item.status !== 'draft'
+        if (reserved && quantityChanged) inventoryMovement(state, stamp, order, item, 'release')
         const quantity = command.quantity === undefined ? item.quantity : checkNumber(command.quantity, 1, 999, 'количество порций')
         if (quantityChanged || changeSelection) {
-          const product = sellableProduct(state, item.productId, quantity)
+          const product = sellableProduct(state, item.productId, reserved && !quantityChanged ? 0 : quantity)
           item.quantity = quantity
           if (changeSelection) {
             const selected = selection(state, product, command.sizeId ?? item.sizeId, command.optionIds ?? item.optionIds)
@@ -674,6 +675,7 @@ export function applyCommand(previous: State, session: Session, command: Command
             Object.assign(item, selected)
           }
         }
+        if (reserved && quantityChanged) { inventoryMovement(state, stamp, order, item, 'reserve'); inventoryIds.add(item.productId) }
         if (command.comment !== undefined) {
           const comment = checkText(command.comment, 'комментарий', 500, true)
           if (comment) item.comment = comment
@@ -686,6 +688,7 @@ export function applyCommand(previous: State, session: Session, command: Command
     }
     case 'cancelItem':
     case 'readyItem':
+    case 'unreadyItem':
     case 'serveItem': {
       const order = activeOrder(state, session, command.orderId)
       const item = itemIn(order, command.itemId)
@@ -698,6 +701,11 @@ export function applyCommand(previous: State, session: Session, command: Command
         }
         item.status = 'canceled'
         item.canceledAt = stamp.now
+      } else if (command.type === 'unreadyItem') {
+        if (item.status === 'preparing') return previous
+        requireCondition(item.status === 'ready', 'Позиция не готова')
+        item.status = 'preparing'
+        delete item.readyAt
       } else if (command.type === 'readyItem') {
         if (item.status === 'ready' || item.status === 'served') return previous
         requireCondition(item.status === 'preparing', 'Сначала отправьте позицию на приготовление')
@@ -717,7 +725,7 @@ export function applyCommand(previous: State, session: Session, command: Command
     case 'sendOrder': {
       const order = editableOrder(state, session, command.orderId)
       const draft = orderItems(order).filter(item => item.status === 'draft')
-      requireCondition(draft.length, 'Добавьте позиции для отправки')
+      if (!draft.length) return previous
       const totals = new Map<string, number>()
       for (const item of draft) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
       for (const [productId, quantity] of totals) sellableProduct(state, productId, quantity)
