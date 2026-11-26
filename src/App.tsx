@@ -88,6 +88,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
           placeholder={demo ? 'Имя сотрудника' : 'Электронная почта'} autoComplete={demo ? 'nickname' : 'username'}
           value={name} onChange={event => setName(event.target.value)} required maxLength={demo ? 64 : 254} />
         </label>
+        {demo && <p className="muted">Введите имя точно так же, как при предыдущем входе.</p>}
         {!demo && <label className="login-input"><KeyRound size={19} /><input type="password" aria-label="Пароль" placeholder="Пароль" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>}
         {error && <p className="error-text" role="alert">{error}</p>}
         <button type="submit" className="primary" disabled={pending}>{pending ? 'Вход…' : 'Войти'}</button>
