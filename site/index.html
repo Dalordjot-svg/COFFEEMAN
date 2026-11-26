@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content" />
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -13,7 +13,68 @@
     <title>COFFEEMAN — Waiter System</title>
     <script type="module" crossorigin src="./assets/index-BiBP7V3y.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-Bxqr6NHq.css">
-  <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script></head>
+  <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script><style>/* Mobile viewport: preserve native scrolling and system text input. */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+    font-size: 16px !important;
+    scroll-margin-block: 16px;
+  }
+  html[data-keyboard-open] .bottom-nav,
+  html[data-keyboard-open] .order-fab { visibility: hidden; }
+  html[data-keyboard-open] .app-shell.with-nav { padding-bottom: 16px; }
+  html[data-keyboard-open] .order-bottom { position: static; }
+  html[data-keyboard-open] .login-page,
+  html[data-keyboard-open] .app-shell,
+  html[data-keyboard-open] .order-screen { min-height: var(--mobile-visible-height, 100dvh); }
+  html[data-keyboard-open] .root-sheet:not(.quick-sheet) {
+    bottom: var(--mobile-viewport-bottom, 0px);
+    max-height: calc(var(--mobile-visible-height, 100dvh) - 24px);
+  }
+  html[data-keyboard-open] body { padding-bottom: var(--mobile-viewport-bottom, 0px); }
+}
+</style><script type="module">// Keep the focused native input visible when the visual viewport shrinks.
+const viewport = window.visualViewport
+const root = document.documentElement
+let frame = 0
+let baseline = window.innerHeight
+const isTextField = (element) =>
+  element instanceof HTMLElement && (
+    element.matches('textarea:not([readonly]):not([disabled]), [contenteditable="true"]') ||
+    element instanceof HTMLInputElement && !element.readOnly && !element.disabled &&
+      ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(element.type)
+  )
+const updateViewport = () => {
+  cancelAnimationFrame(frame)
+  frame = requestAnimationFrame(() => {
+    const active = document.activeElement
+    const editing = isTextField(active)
+    const height = viewport?.height ?? window.innerHeight
+    const top = viewport?.offsetTop ?? 0
+    if (!editing) baseline = window.innerHeight
+    const keyboard = editing && Math.max(baseline, window.innerHeight) - height > 100 &&
+      Math.abs((viewport?.scale ?? 1) - 1) < 0.02
+    root.toggleAttribute('data-keyboard-open', keyboard)
+    root.style.setProperty('--mobile-visible-height', height + 'px')
+    root.style.setProperty('--mobile-viewport-bottom',
+      Math.max(0, root.clientHeight - height - top) + 'px')
+    if (keyboard && isTextField(active)) {
+      const rect = active.getBoundingClientRect()
+      if (rect.bottom > top + height - 16 || rect.top < top + 16) {
+        active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      }
+    }
+  })
+}
+viewport?.addEventListener('resize', updateViewport)
+viewport?.addEventListener('scroll', updateViewport)
+window.addEventListener('resize', updateViewport)
+window.addEventListener('orientationchange', () => { baseline = 0; updateViewport() })
+document.addEventListener('focusin', updateViewport)
+document.addEventListener('focusout', updateViewport)
+updateViewport()
+
+</script></head>
   <body>
     <div id="root"></div>
   </body>
