@@ -119,7 +119,7 @@ export function createFirebaseStore(): Store {
  subscribe(listener,onError) { listeners.add(listener);if(loaded)listener(projected());const detach=onValue(root,s=>{base=normalizeState(s.val());loaded=true;publish()},e=>onError?.(asError(e)));return ()=>{listeners.delete(listener);detach()} },
  subscribeConnection(listener) {
  const stop = connectionSubscribe(listener,()=>!navigator.onLine?'offline':connected?'online':'connecting')
- const detach=onValue(ref(database,'.info/connected'),s=>{connected=s.val()===true;listener(connected?'online':'offline')},()=>listener('offline'))
+ const detach=onValue(ref(database,'.info/connected'),s=>{connected=s.val()===true;listener(connected?'online':'offline');if(connected)void flush()},()=>listener('offline'))
  return ()=>{stop();detach()}
  },
  subscribePresence(listener,onError) { if (!session) {listener(new Set());return ()=>undefined} const close=startFirebasePresence(database,session,listener,onError);return ()=>{void close()} },
@@ -160,7 +160,7 @@ export function createFirebaseStore(): Store {
  const now=Date.now()
  if(!loaded)throw new Error('Дождитесь загрузки данных')
  applyCommand(projected(),actor,command,{id:operationId,now})
- queue.push({actor,command,id:operationId,now});try{persist()}catch(e){queue.pop();throw e}publish()
+ queue.push({actor,command,id:operationId,now});try{persist()}catch(e){queue.pop();throw e}publish();void flush()
  }
  }
 }

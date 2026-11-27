@@ -70,7 +70,7 @@ export async function addProduct(page: Page, name: string, guest = 1) {
 
 export async function itemAction(page: Page, item: string, action: string) {
   const dialog = page.getByRole('dialog')
-  if (!(await dialog.isVisible())) await page.getByRole('button', { name: new RegExp(item) }).click()
+  if (!(await dialog.isVisible())) await page.locator('.order-item-row').filter({ hasText: item }).click()
   await dialog.getByRole('button', { name: action, exact: true }).click()
   if (action !== 'Отметить готовым') await expect(dialog).toHaveCount(0)
 }

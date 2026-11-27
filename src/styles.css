@@ -244,3 +244,12 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
   }
   html[data-keyboard-open] body { padding-bottom: var(--mobile-viewport-bottom, 0px); }
 }
+
+.sync-notice { width: min(calc(100% - 24px), 480px); margin: max(10px, var(--safe-top)) auto 0; padding: 12px; background: #292124; color: white; border: 1px solid #a95858; border-radius: 14px; }
+@media (pointer: coarse) {
+  html[data-keyboard-open] .admin-nav { visibility: hidden; }
+  html[data-keyboard-open] .admin-modal {
+    bottom: var(--mobile-viewport-bottom, 0px);
+    max-height: calc(var(--mobile-visible-height, 100dvh) - 24px);
+  }
+}

@@ -84,7 +84,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
       <form className="login-form" onSubmit={enter}>
         <label className="login-input"><UserRound size={19} /><input
           type="text" aria-label="Имя сотрудника"
-          placeholder="Имя сотрудника" autoComplete="nickname"
+          placeholder="Имя сотрудника" autoComplete="nickname" enterKeyHint="go"
           value={name} onChange={event => setName(event.target.value)} required maxLength={60} />
         </label>
         <p className="muted">Введите имя точно так же, как при предыдущем входе.</p>

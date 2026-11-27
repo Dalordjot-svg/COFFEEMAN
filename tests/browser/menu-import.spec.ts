@@ -36,7 +36,7 @@ test('импорт меню скачивает задание для ИИ, пр�
     await page.screenshot({ path: 'docs/screenshots/390x844/admin-03b-menu-import.png', animations: 'disabled', scale: 'css' })
   }
   await apply.click()
-  await expect(form.getByText('Меню импортировано', { exact: true })).toBeVisible()
+  await expect(form.getByRole('status').filter({ hasText: 'Меню добавлено' })).toBeVisible()
 
   const changedPrice = { ...menu, products: [{ name: ' чай   qa ', category: ' бариста   QA ', price: 930 }] }
   await input.fill(JSON.stringify(changedPrice))

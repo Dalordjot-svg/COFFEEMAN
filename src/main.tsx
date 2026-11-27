@@ -31,7 +31,7 @@ const updateViewport = () => {
     if (keyboard && isTextField(active)) {
       const rect = active.getBoundingClientRect()
       if (rect.bottom > top + height - 16 || rect.top < top + 16) {
-        active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+        active.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
       }
     }
   })
@@ -50,8 +50,8 @@ createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictM
 const syncNotice = document.createElement('aside')
 syncNotice.setAttribute('role', 'alert')
 syncNotice.hidden = true
-syncNotice.style.cssText = 'position:fixed;z-index:2147483647;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;max-width:480px;margin:auto;padding:14px;background:#292124;color:white;border:1px solid #a95858;border-radius:14px;font:16px system-ui;box-shadow:0 8px 30px #0008'
-document.body.append(syncNotice)
+syncNotice.className = 'sync-notice'
+document.body.prepend(syncNotice)
 let syncCode = ''
 let syncOperation = ''
 function showSyncNotice(message: string, code: string, operationId = '') {
@@ -84,5 +84,3 @@ window.addEventListener('coffeeman-sync-error', event => {
 window.addEventListener('coffeeman-sync-confirmed', event => {
   if ((event as CustomEvent<{code: string; operationId: string}>).detail.operationId === syncOperation) syncNotice.hidden = true
 })
-
-if (import.meta.env.VITE_APP_MODE !== 'firebase') showSyncNotice('Локальный режим. Данные не синхронизируются с Firebase. Свяжитесь с администратором.', 'sync/demo-mode')

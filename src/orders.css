@@ -295,7 +295,6 @@
   border: 0;
   transition: background 180ms;
 }
-.order-item-row + .order-item-row { border-top: 1px solid var(--order-edge); }
 .order-item-row:active, .order-item-empty:is(button):active { background: var(--order-surface); }
 .order-item-quantity { color: var(--order-muted); font-weight: 660; font-size: 13px; align-self: start; text-align: center; }
 .order-item-description, .order-item-price { display: flex; min-width: 0; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
@@ -727,3 +726,8 @@ html:has(.order-sheet[open]) { overflow: hidden; }
 .order-checkout-line strong { white-space: nowrap; }
 .order-swipe { position: relative; min-height: 52px; padding: 4px 10px 4px 50px; display: grid; place-items: center; text-align: center; border-radius: 12px; background: #182c50; color: #e6eeff; font-weight: 650; }
 .order-swipe button { position: absolute; inset: 4px auto 4px 4px; width: 44px; display: grid; place-items: center; border-radius: 9px; background: var(--blue-fill); color: white; touch-action: none; }
+
+.order-item-entry { display: flex; align-items: stretch; }
+.order-item-entry + .order-item-entry { border-top: 1px solid var(--order-edge); }
+.order-item-entry .order-item-row { flex: 1; min-width: 0; }
+.order-item-quick { flex: 0 0 auto; min-width: 60px; padding-inline: 6px; border-inline-start: 1px solid var(--order-edge); font-size: 12px; font-weight: 700; color: var(--green, #60d186); }
