@@ -31,7 +31,7 @@ test('оповещения срабатывают, а тестовое удал�
   await page.getByRole('button', { name: 'Настройки', exact: true }).click()
   const removal = page.getByRole('switch', { name: 'Удаление выданных позиций' })
   await expect(removal).not.toBeChecked()
-  await expect(page.getByText(/В тестировании/)).toBeVisible()
+  await expect(page.getByText(/В тестировании · Face ID/)).toBeVisible()
   await page.getByRole('button', { name: 'Проверить оповещения' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-vibration', '120,70,120')
   await expect(page.locator('html')).toHaveAttribute('data-sound-count', '1')

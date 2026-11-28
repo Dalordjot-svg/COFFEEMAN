@@ -13,6 +13,7 @@ import { Orders } from './Orders'
 import type { OrdersScreen } from './Orders'
 import { store } from './store'
 import type { Connection } from './store'
+import { showSystemNotification, SystemNotificationSettings, useSystemNotifications, vibrateDevice } from './SystemNotifications'
 import { Home, Profile, Stock, Toggle, defaultPreferences } from './Waiter'
 import type { Preferences, ProfileScreen } from './Waiter'
 import { ActionRow, Empty, IconButton, Sheet } from './ui'
@@ -116,6 +117,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
 
 export default function App() {
   const appearance = useAppearance()
+  const systemNotifications = useSystemNotifications()
   const [session, setSession] = useState<Session | null>(null)
   const [state, setState] = useState(emptyState)
   const [loading, setLoading] = useState(true)
@@ -170,7 +172,12 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return
+    let initial = true
     return store.subscribe(next => {
+      if (initial) {
+        for (const id of Object.keys(next.notifications)) delivered.current.add(id)
+        initial = false
+      }
       setState(next)
       setNow(Date.now())
     }, err => setToast(err.message))
@@ -209,7 +216,7 @@ export default function App() {
   ).sort((a, b) => b.at - a.at)
   const alerts = session && preferences.delay ? orderAlerts(state, now, session.userId).filter(alert => alert.tone !== 'green') : []
   const liveSignals = [
-    ...visibleNotices.filter(notice => notice.at > seen).map(notice => ({id: notice.id, message: notice.message})),
+    ...visibleNotices.map(notice => ({id: notice.id, message: notice.message})),
     ...alerts.map(alert => ({id: `alert_${alert.orderId}_${alert.reason}_${alert.tone}`, message: `${orderTitle(state.orders[alert.orderId])} · ${alert.reason}`})),
   ]
   const liveSignature = JSON.stringify(liveSignals)
@@ -220,10 +227,17 @@ export default function App() {
     signals.forEach(signal => delivered.current.add(signal.id))
     if (!next) return
     if (modal !== 'notifications') setToast(next.message)
-    if (preferences.vibration) navigator.vibrate?.([120, 70, 120])
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) { void navigator.serviceWorker?.ready.then(reg => reg.showNotification('COFFEEMAN', {body:next.message,tag:next.id})).catch(()=>undefined) }
-    if (preferences.sound && audio.current) void unlockSound(true).catch(() => undefined)
-  }, [liveSignature, modal, session, preferences.sound, preferences.vibration, demo])
+    const vibrated = preferences.vibration && vibrateDevice()
+    const localSound = () => {
+      if (!document.hidden && preferences.sound && audio.current) void unlockSound(true).catch(() => undefined)
+    }
+    const systemFeedback = document.hidden || (preferences.vibration && !vibrated)
+    if (systemNotifications.permission === 'granted') {
+      if (!systemFeedback) localSound()
+      void showSystemNotification(next.message, next.id, systemFeedback && preferences.sound, preferences.vibration && !vibrated)
+        .catch(() => { if (systemFeedback) localSound() })
+    } else localSound()
+  }, [liveSignature, modal, session, preferences.sound, preferences.vibration, demo, systemNotifications.permission])
 
   useEffect(() => {
     const back = (event: PopStateEvent) => {
@@ -273,13 +287,15 @@ export default function App() {
     }
   }
   const testSignals = () => {
-    const vibrated = preferences.vibration && navigator.vibrate?.([120, 70, 120])
+    const vibrated = preferences.vibration && vibrateDevice()
     if (preferences.sound) void unlockSound(true).catch(() => setToast('Браузер не смог воспроизвести звук'))
-    setToast(preferences.sound || vibrated ? 'Проверка оповещений' : 'Включите звук или вибрацию в настройках устройства и приложения')
+    setToast(preferences.vibration && !vibrated
+      ? 'Вибрация в браузере недоступна. Проверьте системное уведомление и настройки телефона.'
+      : preferences.sound || vibrated ? 'Проверка оповещений' : 'Включите звук или вибрацию в настройках приложения.')
   }
   const updatePreference = (key: keyof Preferences, value: boolean) => {
     if (key === 'sound' && value) void unlockSound(true).catch(() => setToast('Браузер не смог воспроизвести звук'))
-    if (key === 'vibration' && value) navigator.vibrate?.(65)
+    if (key === 'vibration' && value) vibrateDevice(65)
     const updated = {...preferences, [key]: value}
     setPreferences(updated)
     try { localStorage.setItem('coffeeman:preferences:' + session?.userId, JSON.stringify(updated)) }
@@ -307,11 +323,14 @@ export default function App() {
   const orderView = screen.page === 'orders' || screen.page === 'tables' || screen.page === 'order' || screen.page === 'catalog'
   const showOrders = orderView && (!admin || screen.page === 'order' || screen.page === 'catalog')
   const appearanceSettings = <AppearanceSettings {...appearance} />
+  const notificationSettings = <SystemNotificationSettings permission={systemNotifications.permission} pending={systemNotifications.pending} feedback={systemNotifications.feedback}
+    onEnable={() => { void systemNotifications.runTest(preferences.sound, preferences.vibration, true) }}
+    onTest={() => { void systemNotifications.runTest(preferences.sound, preferences.vibration, false) }}
+    onInstall={() => { setModal(undefined); openGuide?.() }} />
   return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
       <button type="button" onClick={openNotifications}>Уведомления {visibleNotices.filter(n=>n.at>seen).length || ''}</button>
-      {typeof Notification !== 'undefined' && Notification.permission === 'default' && <button type="button" onClick={()=>void Notification.requestPermission()}>Разрешить уведомления</button>}
       <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} onlineUserIds={onlineUsers} appearanceSettings={appearanceSettings} /></Suspense>
     </div> :
       <>
@@ -321,7 +340,7 @@ export default function App() {
         {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
         {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
           navigate={view => navigate({page: 'profile', view})} preferences={preferences} setPreference={updatePreference}
-          testSignals={testSignals} removalEnabled={removalEnabled} setRemovalEnabled={setRemovalEnabled} appearanceSettings={appearanceSettings}
+          testSignals={testSignals} removalEnabled={removalEnabled} setRemovalEnabled={setRemovalEnabled} appearanceSettings={appearanceSettings} notificationSettings={notificationSettings}
           connection={connection} period={period} setPeriod={setPeriod} onInstall={openGuide} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
       </>}
     {(!admin || showOrders) && <div hidden={!showOrders}>
@@ -342,7 +361,7 @@ export default function App() {
       </div>
     </Sheet>}
     {modal === 'notifications' && <Sheet title="Уведомления" onClose={() => setModal(undefined)}>
-      {typeof Notification !== 'undefined' && Notification.permission === 'default' && <button type="button" onClick={()=>void Notification.requestPermission()}>Разрешить системные уведомления</button>}
+      {notificationSettings}
       <div className="notice-list">
         {alerts.map(alert => <ActionRow key={`alert-${alert.orderId}`} icon={<Bell size={17} />}
           label={orderTitle(state.orders[alert.orderId])} detail={alert.reason} onClick={() => openOrder(alert.orderId)} />)}

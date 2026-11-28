@@ -182,6 +182,8 @@ a { color: var(--blue); }
 .sheet-title h2 { font-size: 18px; letter-spacing: -.02em; }
 .sheet-title .icon-button { min-width: 38px; min-height: 38px; background: var(--raised); }
 .sheet-note { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.system-notifications { display: grid; gap: 8px; padding: 13px; }
+.system-notifications button { font-size: 14px; }
 .stock-edit { display: grid; gap: 10px; }
 .stock-edit-form { display: grid; gap: 11px; }
 .stock-edit-form .toggle-row { padding-inline: 0; }

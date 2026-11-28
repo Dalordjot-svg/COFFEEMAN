@@ -12,13 +12,13 @@ type BrowserInstallEvent = Event & {
 
 const guideKey = 'coffeeman:install-guide:v1'
 
-function mobilePlatform(): Platform | undefined {
+export function mobilePlatform(): Platform | undefined {
   if (/Android/i.test(navigator.userAgent)) return 'android'
   if (/iPhone|iPad|iPod/i.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios'
 }
 
-function standaloneMode() {
+export function standaloneMode() {
   return window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
 }
