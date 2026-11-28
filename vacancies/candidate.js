@@ -1,6 +1,7 @@
 const storageKey = 'coffeeman.vacancies.demo.v2';
 const fileTypes = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 const limitBytes = 2 * 1024 * 1024;
+const successMessage = 'Красава! Всё сделал правильно. Жди, мы тебе напишем.';
 
 const form = document.querySelector('#form');
 const age = document.querySelector('#age');
@@ -77,8 +78,8 @@ function saveDemo(data) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return savedLocally
-    ? 'Тестовая анкета добавлена в HR Studio в этом браузере. JSON можно импортировать в другом браузере.'
-    : 'Локальное сохранение недоступно. Импортируй скачанный JSON в HR Studio.';
+    ? 'Демо-режим. Тестовая анкета добавлена в HR Studio в этом браузере. JSON можно импортировать в другом браузере.'
+    : 'Демо-режим. Для просмотра анкеты импортируй скачанный JSON в HR Studio.';
 }
 
 function handleSubmit(save) {
@@ -88,7 +89,11 @@ function handleSubmit(save) {
     submit.disabled = true;
     status.textContent = '';
     try {
-      status.textContent = await save(await buildApplication());
+      const demoNote = await save(await buildApplication());
+      const confirmation = document.createElement('strong');
+      confirmation.textContent = successMessage;
+      status.append(confirmation);
+      if (demoNote) status.append(document.createElement('br'), demoNote);
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : 'Не удалось подготовить анкету.';
     } finally {
@@ -131,7 +136,6 @@ async function setupLive() {
     });
     form.reset();
     sync();
-    return 'Анкета отправлена. Администратор свяжется с тобой по указанному контакту.';
   });
 }
 
