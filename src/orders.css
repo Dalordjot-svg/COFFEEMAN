@@ -410,6 +410,15 @@ button.order-item-empty { color: #75a6ff; }
   transition: background 200ms, transform 180ms;
 }
 .order-category:active, .order-product:active { transform: scale(.97); background: var(--order-raised); }
+.order-custom-tile {
+  align-content: center;
+  gap: 6px;
+  border-inline-start-color: var(--order-accent);
+  color: #94b9ff;
+}
+.order-custom-offer { display: grid; gap: 10px; }
+.order-custom-offer .order-empty { margin: 0; }
+.order-price-pending { color: var(--gold, #ffcc66); }
 .order-catalog-location { display: flex; align-items: center; gap: 7px; min-height: 38px; }
 .order-catalog-location h2 { margin: 0; font-size: 17px; font-weight: 680; overflow-wrap: anywhere; }
 .order-catalog-location .order-icon { width: 37px; min-width: 37px; height: 37px; }

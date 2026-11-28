@@ -6,7 +6,7 @@ import {
   Sofa, Tag, UsersRound, X,
 } from 'lucide-react'
 import {
-  availableQuantity, entries, isActiveOrder, newId, orderAlerts, orderStatus, orderStatusLabel,
+  availableQuantity, entries, isActiveOrder, newId, orderAlerts, orderItems, orderStatus, orderStatusLabel,
   orderTitle, orderTotal, stats, stockStatus,
   type Category, type Command, type Hall, type Modifier, type Order, type PriceOption, type Product,
   type Session, type Settings, type State, type Table, type User,
@@ -87,6 +87,8 @@ const auditNames: Record<string, string> = {
   addGuest: 'Добавление гостя',
   removeGuest: 'Удаление гостя',
   addItem: 'Добавление позиции',
+  addCustomItem: 'Добавление своей позиции',
+  setCustomItemPrice: 'Цена своей позиции',
   editItem: 'Изменение позиции',
   sendOrder: 'Отправка на приготовление',
   readyOrder: 'Готовность заказа',
@@ -545,7 +547,7 @@ function OrderRow({ order, state, onClick }: { order: Order; state: State; onCli
   return <button type="button" className="admin-row admin-action" onClick={onClick}>
     <span className={`admin-status-dot admin-order-${status}`} />
     <span className="admin-row-copy"><strong>{orderTitle(order)}</strong><small>{orderStatusLabel[status]} · {state.users[order.waiterId]?.name ?? '—'}</small></span>
-    <span className="admin-order-sum">{rubles.format(orderTotal(order))}</span>
+    <span className="admin-order-sum">{orderItems(order).some(item => item.pricePending) ? 'От ' : ''}{rubles.format(orderTotal(order))}</span>
     <ChevronRight size={17} className="admin-chevron" />
   </button>
 }
@@ -694,6 +696,7 @@ function OrderDetail({ state, order, execute, openOrder }: {
   const status = orderStatus(order)
   const items = entries(order.items)
   const activeItems = items.filter(item => item.status !== 'canceled')
+  const pricePending = activeItems.some(item => item.pricePending)
   const active = isActiveOrder(order)
   const waiters = entries(state.users)
     .filter(user => user.role === 'waiter' && (user.active || user.id === order.waiterId))
@@ -713,7 +716,7 @@ function OrderDetail({ state, order, execute, openOrder }: {
     <div className="admin-order-meta">
       <span className={`admin-status-dot admin-order-${status}`} />
       <div><strong>{orderStatusLabel[status]}</strong><small>{formatTime(order.createdAt)} · гостей {order.guestIds.length}</small></div>
-      <strong>{rubles.format(orderTotal(order))}</strong>
+      <strong>{pricePending ? 'От ' : ''}{rubles.format(orderTotal(order))}</strong>
     </div>
     {active && waiters.length > 0 && <Field label="Ответственный официант">
       <select value={order.waiterId} disabled={pending} onChange={event => void run({ type: 'assignOrder', orderId: order.id, waiterId: event.target.value })}>
@@ -727,7 +730,7 @@ function OrderDetail({ state, order, execute, openOrder }: {
           {item.options?.length > 0 && <small>{item.options.map(option => option.name).join(', ')}</small>}
           {item.comment && <small>{item.comment}</small>}
         </span>
-        <strong className="admin-order-sum">{rubles.format(item.unitPrice * item.quantity)}</strong>
+        <strong className="admin-order-sum">{item.pricePending ? 'Цена не указана' : rubles.format(item.unitPrice * item.quantity)}</strong>
         {active && item.status === 'preparing' && <button type="button" className="admin-add" disabled={pending}
           onClick={() => void run({ type: 'readyItem', orderId: order.id, itemId: item.id })}>Готово</button>}
         {active && item.status === 'ready' && <button type="button" className="admin-add" disabled={pending}
@@ -744,7 +747,7 @@ function OrderDetail({ state, order, execute, openOrder }: {
         disabled={pending} onClick={() => void run({ type: 'sendOrder', orderId: order.id })}>Отправить на приготовление</button>}
       {active && activeItems.some(item => item.status === 'preparing') && <button type="button" className="primary"
         disabled={pending} onClick={() => void run({ type: 'readyOrder', orderId: order.id })}>Отметить блюда готовыми</button>}
-      {active && activeItems.length > 0 && activeItems.every(item => item.status === 'served') && <>
+      {active && !pricePending && activeItems.length > 0 && activeItems.every(item => item.status === 'served') && <>
         {!order.precheckAt && <button type="button" className="secondary" disabled={pending}
           onClick={() => void run({ type: 'precheckOrder', orderId: order.id })}>Запросить пречек</button>}
         <button type="button" className="primary" disabled={pending}

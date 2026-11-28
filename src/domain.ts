@@ -23,6 +23,7 @@ export type InventoryTransaction = {
 export type ItemStatus = 'draft' | 'preparing' | 'ready' | 'served' | 'canceled'
 export type OrderItem = {
   id: string; guestId: string; productId: string; name: string; quantity: number; unitPrice: number
+  custom?: true; pricePending?: true
   unitCost?: number; sizeId?: string; sizeName?: string; optionIds: string[]; options: { name: string; price: number }[]
   comment?: string; status: ItemStatus; createdAt: number; sentAt?: number; readyAt?: number; servedAt?: number; canceledAt?: number
 }
@@ -63,6 +64,8 @@ export type Command =
   | { type: 'createOrder'; orderId: string; tableId?: string; tabName?: string; guestCount: number }
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
   | { type: 'addItem'; orderId: string; guestId: string; itemId: string; productId: string; quantity: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
+  | { type: 'addCustomItem'; orderId: string; guestId: string; itemId: string; name: string; comment: string; price?: number }
+  | { type: 'setCustomItemPrice'; orderId: string; itemId: string; price: number }
   | { type: 'editItem'; orderId: string; itemId: string; guestId?: string; quantity?: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
   | { type: 'cancelItem' | 'readyItem' | 'serveItem' | 'unreadyItem'; orderId: string; itemId: string }
   | { type: 'sendOrder' | 'precheckOrder' | 'closeOrder' | 'cancelOrder' | 'reopenOrder' | 'readyOrder'; orderId: string }
@@ -681,6 +684,33 @@ export function applyCommand(previous: State, session: Session, command: Command
       detail = product.name
       break
     }
+    case 'addCustomItem': {
+      const order = editableOrder(state, session, command.orderId)
+      guestIn(order, command.guestId)
+      checkId(command.itemId)
+      requireCondition(!order.items[command.itemId], 'Позиция уже добавлена')
+      const name = checkText(command.name, 'название', 80)
+      const comment = checkText(command.comment, 'комментарий', 500, true)
+      order.items[command.itemId] = {
+        id: command.itemId, guestId: command.guestId, productId: command.itemId, name,
+        quantity: 1, custom: true, unitPrice: command.price === undefined ? 0 : checkPrice(command.price),
+        ...(command.price === undefined ? { pricePending: true } : {}),
+        ...(comment ? { comment } : {}), optionIds: [], options: [], status: 'draft', createdAt: stamp.now,
+      }
+      orderId = order.id
+      detail = name
+      break
+    }
+    case 'setCustomItemPrice': {
+      const order = editableOrder(state, session, command.orderId)
+      const item = itemIn(order, command.itemId)
+      requireCondition(item.custom && item.status !== 'canceled', 'Цена доступна для изменения только у своей позиции')
+      item.unitPrice = checkPrice(command.price)
+      delete item.pricePending
+      orderId = order.id
+      detail = item.name
+      break
+    }
     case 'editItem': {
       const order = editableOrder(state, session, command.orderId)
       const item = itemIn(order, command.itemId)
@@ -691,6 +721,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       }
       const changeSelection = command.sizeId !== undefined || command.optionIds !== undefined || command.customSyrup !== undefined
       const quantityChanged = command.quantity !== undefined && command.quantity !== item.quantity
+      requireCondition(!item.custom || (!quantityChanged && !changeSelection), 'Для своей позиции варианты меню недоступны')
       if (quantityChanged || changeSelection || command.comment !== undefined) {
         const reserved = item.status !== 'draft'
         if (reserved && quantityChanged) inventoryMovement(state, stamp, order, item, 'release')
@@ -725,7 +756,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       if (command.type === 'cancelItem') {
         if (item.status === 'canceled') return previous
         requireCondition(order.precheckAt === undefined && item.status !== 'served', 'Выданную позицию нельзя отменить')
-        if (item.status !== 'draft') {
+        if (!item.custom && item.status !== 'draft') {
           inventoryMovement(state, stamp, order, item, 'release')
           inventoryIds.add(item.productId)
         }
@@ -743,8 +774,10 @@ export function applyCommand(previous: State, session: Session, command: Command
       } else {
         if (item.status === 'served') return previous
         requireCondition(item.status === 'ready', 'Сначала отметьте позицию готовой')
-        inventoryMovement(state, stamp, order, item, 'serve')
-        inventoryIds.add(item.productId)
+        if (!item.custom) {
+          inventoryMovement(state, stamp, order, item, 'serve')
+          inventoryIds.add(item.productId)
+        }
         item.status = 'served'
         item.servedAt = stamp.now
       }
@@ -757,13 +790,17 @@ export function applyCommand(previous: State, session: Session, command: Command
       const draft = orderItems(order).filter(item => item.status === 'draft')
       if (!draft.length) return previous
       const totals = new Map<string, number>()
-      for (const item of draft) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
+      for (const item of draft) {
+        if (!item.custom) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
+      }
       for (const [productId, quantity] of totals) sellableProduct(state, productId, quantity)
       for (const item of draft) {
-        inventoryMovement(state, stamp, order, item, 'reserve')
-        inventoryIds.add(item.productId)
-        const cost = state.products[item.productId]?.cost
-        if (cost !== undefined) item.unitCost = cost
+        if (!item.custom) {
+          inventoryMovement(state, stamp, order, item, 'reserve')
+          inventoryIds.add(item.productId)
+          const cost = state.products[item.productId]?.cost
+          if (cost !== undefined) item.unitCost = cost
+        }
         item.status = 'preparing'
         item.sentAt = stamp.now
       }
@@ -784,6 +821,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       const order = activeOrder(state, session, command.orderId)
       const items = orderItems(order)
       requireCondition(items.length && items.every(item => item.status !== 'draft'), 'Сначала отправьте все позиции')
+      requireCondition(!items.some(item => item.pricePending), 'Укажите цены своих позиций перед расчётом')
       if (command.type === 'precheckOrder') {
         if (order.precheckAt !== undefined) return previous
         order.precheckAt = stamp.now
@@ -791,8 +829,10 @@ export function applyCommand(previous: State, session: Session, command: Command
         requireCondition(order.precheckAt !== undefined || items.every(item => item.status === 'served'), 'Выдайте все позиции или оформите предчек')
         for (const item of items) {
           if (item.status === 'served') continue
-          inventoryMovement(state, stamp, order, item, 'serve')
-          inventoryIds.add(item.productId)
+          if (!item.custom) {
+            inventoryMovement(state, stamp, order, item, 'serve')
+            inventoryIds.add(item.productId)
+          }
           item.status = 'served'
           item.readyAt ??= stamp.now
           item.servedAt = stamp.now
@@ -807,7 +847,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       const items = orderItems(order)
       requireCondition(!items.some(item => item.status === 'served'), 'Нельзя отменить заказ с выданными позициями')
       for (const item of items) {
-        if (item.status !== 'draft') {
+        if (!item.custom && item.status !== 'draft') {
           inventoryMovement(state, stamp, order, item, 'release')
           inventoryIds.add(item.productId)
         }

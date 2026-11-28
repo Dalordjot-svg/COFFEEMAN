@@ -29,6 +29,34 @@ function addCheesecake(execute: ReturnType<typeof fixture>['execute'], orderId: 
   execute({ type: 'addItem', orderId, guestId: 'guest-1', itemId, productId: 'cheesecake', quantity }, actor)
 }
 
+it('проводит свою позицию без складского учёта и требует цену перед расчётом', () => {
+  const { execute, state } = fixture()
+  const orderId = 'custom-order'
+  const itemId = 'cheesecake'
+  const before = state()
+  execute({ type: 'createOrder', orderId, tabName: 'Гости', guestCount: 1 })
+  execute({ type: 'addCustomItem', orderId, guestId: 'guest-1', itemId, name: 'Особое блюдо', comment: 'Без лука' })
+  execute({ type: 'addCustomItem', orderId, guestId: 'guest-1', itemId: 'custom-free', name: 'Комплимент', comment: '', price: 0 })
+  expect(normalizeState(JSON.parse(JSON.stringify(state()))).orders[orderId].items[itemId]).toMatchObject({
+    custom: true, pricePending: true, comment: 'Без лука',
+  })
+  expect(state().orders[orderId].items['custom-free'].pricePending).toBeUndefined()
+  execute({ type: 'sendOrder', orderId })
+  execute({ type: 'readyOrder', orderId })
+  execute({ type: 'serveItem', orderId, itemId })
+  execute({ type: 'cancelItem', orderId, itemId: 'custom-free' })
+  expect(() => execute({ type: 'precheckOrder', orderId })).toThrow(/Укажите цены/)
+  expect(() => execute({ type: 'closeOrder', orderId })).toThrow(/Укажите цены/)
+  expect(() => execute({ type: 'setCustomItemPrice', orderId, itemId, price: 185.50 }, anna)).toThrow(/другому официанту/)
+  execute({ type: 'setCustomItemPrice', orderId, itemId, price: 185.50 })
+  execute({ type: 'closeOrder', orderId })
+  expect(orderStatus(state().orders[orderId])).toBe('closed')
+  expect(orderTotal(state().orders[orderId])).toBe(185.50)
+  expect(state().inventory).toEqual(before.inventory)
+  expect(state().inventoryReservations).toEqual(before.inventoryReservations)
+  expect(state().inventoryTransactions).toEqual(before.inventoryTransactions)
+})
+
 describe('резервирование и списание', () => {
   it('позволяет резервировать последнюю порцию только один раз и списывает её только после выдачи', () => {
     const { execute, state } = fixture()

@@ -50,6 +50,7 @@ const itemStatus: Record<OrderItem['status'], string> = {
   served: 'Выдано',
   canceled: 'Отменено',
 };
+const pendingPriceLabel = 'Цена не указана';
 
 const currency = new Intl.NumberFormat('ru-RU', {
   style: 'currency',
@@ -388,7 +389,7 @@ function OrderCard({ state, order, alert, showWaiter, open }: {
       </ul>
       <span className="order-card-footer">
         <span className="order-card-guests" aria-label={'Гостей ' + order.guestIds.length}><Users size={15} />{order.guestIds.length}</span>
-        <strong>{formatCurrency(orderTotal(order))}</strong>
+        <strong>{items.some(item => item.pricePending) ? 'От ' : ''}{formatCurrency(orderTotal(order))}</strong>
       </span>
     </button>
   );
@@ -495,9 +496,10 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   const currentStatus = orderAppearance(order, alert);
   const drafts = items.filter((item) => item.status === 'draft');
   const ready = items.filter((item) => item.status === 'ready');
+  const pending = items.filter((item) => item.pricePending);
   const allServed = items.length > 0 && items.every(item => item.status === 'served');
-  const canPrecheck = items.length > 0 && drafts.length === 0;
-  const canCheckout = allServed || order.precheckAt !== undefined;
+  const canPrecheck = items.length > 0 && drafts.length === 0 && !pending.length;
+  const canCheckout = !pending.length && (allServed || order.precheckAt !== undefined);
   const unsent = items.every(item => item.status === 'draft');
   const cancelLabel = unsent ? 'Удалить заказ' : 'Отменить заказ';
   const hasGuests = order.guestIds.length > 0;
@@ -510,7 +512,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       action = { label: 'К расчёту', execute: () => { mutation.clearError(); setMenu('checkout'); }, icon: <Check size={19} /> };
     } else if (drafts.length) {
       action = { label: 'Отправить на кухню', execute: () => { void mutation.perform({ type: 'sendOrder', orderId: order.id }); }, icon: <Send size={18} /> };
-    } else if (hasGuests && !order.precheckAt) {
+    } else if (hasGuests && !order.precheckAt && !allServed) {
       action = { label: items.length ? 'Добавить дозаказ' : 'Добавить позиции', execute: () => catalog(order.guestIds[0]), icon: <Plus size={21} /> };
     }
   }
@@ -556,7 +558,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
         return <section className="order-guest" key={guestId} aria-labelledby={'guest-' + guestId}>
           <header className="order-guest-heading">
             <h2 id={'guest-' + guestId}>Гость {index + 1}</h2>
-            {guestItems.length > 0 && <small>· {formatCurrency(guestTotal)}</small>}
+            {guestItems.length > 0 && <small>· {guestItems.some(item => item.pricePending) ? 'от ' : ''}{formatCurrency(guestTotal)}</small>}
             {editable && !order.precheckAt && <div className="order-guest-actions">
               {guestItems.length === 0 && order.guestIds.length > 1 && <OrderIconButton label={'Удалить гостя ' + (index + 1)} onClick={() => { void mutation.perform({ type: 'removeGuest', orderId: order.id, guestId }); }}><Minus size={16} /></OrderIconButton>}
               <OrderIconButton label={'Добавить позицию гостю ' + (index + 1)} onClick={() => catalog(guestId)}><Plus size={18} /></OrderIconButton>
@@ -571,7 +573,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
                 {(item.sizeName || item.options.length > 0) && <small>{[item.sizeName, ...item.options.map((option) => option.name)].filter(Boolean).join(' · ')}</small>}
                 {item.comment && <small className="order-item-comment">{item.comment}</small>}
               </span>
-              <span className="order-item-price"><strong>{formatCurrency(item.unitPrice * item.quantity)}</strong><small className={'item-status-' + item.status}>{itemStatus[item.status]}</small></span>
+              <span className="order-item-price"><strong className={item.pricePending ? 'order-price-pending' : undefined}>{item.pricePending ? pendingPriceLabel : formatCurrency(item.unitPrice * item.quantity)}</strong><small className={'item-status-' + item.status}>{itemStatus[item.status]}</small></span>
               <ChevronRight size={16} className="order-item-chevron" aria-hidden="true" />
             </button>
             {editable && (item.status === 'ready' || item.status === 'preparing') && <button type="button"
@@ -595,7 +597,11 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
       </div>}
       <div className="order-bottom order-editor-bottom">
         {!selected && !menu && <FormError text={mutation.error} />}
-        <div className="order-total"><span>Итого</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
+        <div className="order-total"><span>{pending.length ? 'Сумма известных цен' : 'Итого'}</span><strong>{formatCurrency(orderTotal(order))}</strong></div>
+        {editable && pending.length > 0 && <button type="button" className="secondary order-price-pending" disabled={mutation.busy} onClick={() => {
+          mutation.clearError();
+          setSelectedItem(pending[0].id);
+        }}>Указать цену{pending.length > 1 ? ` · ${pending.length}` : ''}</button>}
         {editable && order.precheckAt !== undefined && <button type="button" className="secondary" disabled={mutation.busy} onClick={() => { void mutation.perform({type:'reopenOrder',orderId:order.id}); }}>Отмена предчека</button>}
         {action && <button type="button" className="primary" disabled={mutation.busy} onClick={action.execute}>{action.icon}{action.label}</button>}
         {editable && !canCheckout && canPrecheck && <button type="button" className="primary" disabled={mutation.busy} onClick={() => { void mutation.perform({type:'precheckOrder',orderId:order.id}); }}>Предчек</button>}
@@ -612,7 +618,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
                 onClick={() => { void itemAction('unreadyItem', selected.id); }}>Вернуть в приготовление</button>
             </>}
         </div>}
-        {editable && !order.precheckAt && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm
+        {editable && !order.precheckAt && !selected.custom && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm
           product={state.products[selected.productId]} state={state} order={order} guestId={selected.guestId} item={selected}
           busy={mutation.busy} error={mutation.error}
           submit={async (details) => {
@@ -623,7 +629,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
             <div className="order-item-summary">
               <div><small>Статус</small><strong className={'item-status-' + selected.status}>{itemStatus[selected.status]}</strong></div>
               <div><small>Количество</small><strong>{selected.quantity} шт.</strong></div>
-              <div><small>Сумма</small><strong>{formatCurrency(selected.quantity * selected.unitPrice)}</strong></div>
+              <div><small>Сумма</small><strong>{selected.pricePending ? pendingPriceLabel : formatCurrency(selected.quantity * selected.unitPrice)}</strong></div>
             </div>
             {(selected.sizeName || selected.options.length > 0) && <p className="order-sheet-caption">{[selected.sizeName, ...selected.options.map((option) => option.name)].filter(Boolean).join(' · ')}</p>}
             {selected.comment && <div className="order-detail-comment">{selected.comment}</div>}
@@ -633,7 +639,11 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
                 {order.guestIds.map((id, index) => <option key={id} value={id}>Гость {index + 1}</option>)}
               </select>
             </label>}
-            <FormError text={mutation.error} />
+            {editable && !order.precheckAt && selected.custom && selected.status !== 'canceled'
+              ? <CustomItemForm key={selected.id} item={selected} busy={mutation.busy} error={mutation.error} submit={async ({ price }) => {
+                if (price !== undefined && await mutation.perform({ type: 'setCustomItemPrice', orderId: order.id, itemId: selected.id, price })) closeMenu();
+              }} />
+              : <FormError text={mutation.error} />}
             {editable && (selected.status === 'draft' || selected.status === 'preparing' || selected.status === 'ready') && <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={() => { void itemAction('cancelItem', selected.id); }}><Ban size={17} />{selected.status === 'draft' ? 'Удалить позицию' : 'Отменить позицию'}</button>}
           </div>}
       </OrderSheet>}
@@ -729,6 +739,7 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
   const [search, setSearch] = useState('');
   const searchField = useRef<HTMLInputElement>(null);
   const [productId, setProductId] = useState<string | null>(null);
+  const [customName, setCustomName] = useState<string | null>(null);
   const [added, setAdded] = useState('');
   const mutation = useMutations(execute);
   const editable = (user.role === 'admin' || order.waiterId === user.userId) && !isClosed(order) && !order.precheckAt && order.guestIds.includes(screen.guestId);
@@ -743,7 +754,14 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
     .sort(sortByRank);
   const product = productId ? state.products[productId] : undefined;
   const showProducts = Boolean(category || query);
+  const hasPendingPrice = orderItems(order).some(item => item.pricePending);
   const orderScreen: OrdersScreen = { page: 'order', orderId: order.id, from: screen.from };
+
+  const openCustom = (name: string) => {
+    searchField.current?.blur();
+    mutation.clearError();
+    setCustomName(name.slice(0, 80));
+  };
 
   const chooseProduct = async (entry: Product) => {
     searchField.current?.blur();
@@ -786,19 +804,34 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
               <span className="order-product-info"><strong>{entry.name}</strong><small>{out ? 'В стоп-листе' : formatCurrency(entry.price)}</small></span>
             </button>;
           })}
-        </div> : <OrderEmpty icon={<Search size={26} />}>{query ? 'По вашему запросу ничего не найдено' : 'В категории пока нет позиций'}</OrderEmpty>}
+        </div> : query ? <div className="order-custom-offer">
+          <OrderEmpty icon={<Search size={26} />}>Похоже, такой позиции в меню нет. Добавить свою?</OrderEmpty>
+          <button type="button" className="secondary" disabled={mutation.busy} onClick={() => openCustom(search.trim())}><Plus size={18} />Добавить свою позицию</button>
+        </div> : <OrderEmpty icon={<Search size={26} />}>В категории пока нет позиций</OrderEmpty>}
       </>}
-      {editable && !showProducts && (categories.length ? <div className="order-category-grid">
+      {editable && !showProducts && <div className="order-category-grid">
+        <button type="button" className="order-category order-custom-tile" disabled={mutation.busy} onClick={() => openCustom('')}>
+          <Plus size={21} />Своя позиция
+        </button>
         {categories.map((entry) => {
           const accent = /^#[0-9a-f]{6}$/i.test(entry.color) ? entry.color : '#49556d';
           return <button type="button" className="order-category" key={entry.id} style={{ borderInlineStartColor: accent, backgroundColor: 'color-mix(in srgb, ' + accent + ' 20%, var(--order-surface))' }}
             onClick={() => { setAdded(''); navigate({ ...screen, categoryId: entry.id }); }}>{entry.name}</button>;
         })}
-      </div> : <OrderEmpty icon={<LayoutGrid size={26} />}>В меню пока нет категорий</OrderEmpty>)}
-      {!product && <FormError text={mutation.error} />}
+      </div>}
+      {!product && customName === null && <FormError text={mutation.error} />}
       <div className="order-bottom order-catalog-bottom">
-        <button type="button" className="secondary" onClick={() => navigate(orderScreen)}><ClipboardList size={19} />К заказу <strong>{formatCurrency(orderTotal(order))}</strong></button>
+        <button type="button" className="secondary" onClick={() => navigate(orderScreen)}><ClipboardList size={19} />К заказу <strong>{hasPendingPrice ? 'от ' : ''}{formatCurrency(orderTotal(order))}</strong></button>
       </div>
+      {customName !== null && <OrderSheet title="Своя позиция" onClose={() => { setCustomName(null); mutation.clearError(); }} locked={mutation.busy}>
+        <CustomItemForm initialName={customName} busy={mutation.busy} error={mutation.error} submit={async details => {
+          if (await mutation.perform({ type: 'addCustomItem', orderId: order.id, guestId: screen.guestId, itemId: newId(), ...details })) {
+            setCustomName(null);
+            setSearch('');
+            setAdded(details.name + ' · добавлено');
+          }
+        }} />
+      </OrderSheet>}
       {product && <OrderSheet title={product.name} onClose={() => { setProductId(null); mutation.clearError(); }} locked={mutation.busy}>
         <ProductForm product={product} state={state} order={order} guestId={screen.guestId} busy={mutation.busy} error={mutation.error}
           submit={async ({ guestId, ...details }) => {
@@ -810,6 +843,38 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
       </OrderSheet>}
     </main>
   );
+}
+
+function CustomItemForm({ initialName = '', item, busy, error, submit }: {
+  initialName?: string;
+  item?: OrderItem;
+  busy: boolean;
+  error: string;
+  submit: (details: { name: string; comment: string; price?: number }) => Promise<void>;
+}) {
+  const [name, setName] = useState(item?.name ?? initialName);
+  const [comment, setComment] = useState('');
+  const [priceText, setPriceText] = useState(item && !item.pricePending ? String(item.unitPrice).replace('.', ',') : '');
+  const amount = priceText.trim();
+  const price = /^\d+(?:[.,]\d{1,2})?$/.test(amount) ? Number(amount.replace(',', '.')) : NaN;
+  const validPrice = Number.isFinite(price) && price <= 1_000_000;
+  const canSubmit = !busy && Boolean(name.trim());
+
+  return <form className="order-sheet-content" onSubmit={event => {
+    event.preventDefault();
+    if (canSubmit && validPrice) void submit({ name: name.trim(), comment: comment.trim(), price });
+  }}>
+    {!item && <>
+      <label className="order-field">Название<input value={name} maxLength={80} onChange={event => setName(event.target.value)} /></label>
+      <label className="order-field">Комментарий<textarea rows={2} value={comment} maxLength={500} onChange={event => setComment(event.target.value)} /></label>
+    </>}
+    <label className="order-field">Цена, ₽<input inputMode="decimal" enterKeyHint="done" value={priceText} maxLength={12} onChange={event => setPriceText(event.target.value)} /></label>
+    <FormError text={error} />
+    <button type="submit" className="primary" disabled={!canSubmit || !validPrice}>{item ? 'Сохранить цену' : 'Добавить в заказ'}</button>
+    {!item && <button type="button" className="secondary" disabled={!canSubmit} onClick={() => {
+      void submit({ name: name.trim(), comment: comment.trim() });
+    }}>Уточню позже</button>}
+  </form>;
 }
 
 function ProductForm({ product, state, order, guestId, item, busy, error, submit, remove }: {
