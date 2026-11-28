@@ -1,1 +1,237 @@
-<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>COFFEEMAN — согласие родителя</title><style>body{font:16px system-ui;color:#122247;background:#f4f7fc;margin:0}main{max-width:720px;margin:24px auto;background:white;padding:32px;border-radius:24px}h1{font-size:30px}strong{color:#0759f5}label{display:block;margin:20px 0 6px;font-weight:600}.line{height:28px;border-bottom:1px solid #879bb7}p{line-height:1.55}button{background:#0759f5;color:white;border:0;border-radius:12px;padding:14px;font:inherit}@media print{body{background:white}main{margin:0;padding:12px}button{display:none}}</style><main><strong>COFFEEMAN / CAREERS</strong><h1>Согласие родителя или законного представителя</h1><p>Образец для заполнения. Перед подписанием уточните условия работы и необходимость такого согласия у работодателя.</p><label>ФИО родителя / законного представителя</label><div class="line"></div><label>ФИО несовершеннолетнего</label><div class="line"></div><label>Дата рождения несовершеннолетнего</label><div class="line"></div><label>Наименование работодателя (юридическое лицо / ИП)</label><div class="line"></div><label>Должность и согласованный график работы</label><div class="line"></div><p>Я, указанный выше законный представитель, даю согласие на трудоустройство несовершеннолетнего на согласованных условиях при соблюдении требований законодательства, охраны труда, ограничений по возрасту и продолжительности рабочего времени. Работа не должна препятствовать получению образования.</p><p>Настоящее согласие не является отказом от законных прав, гарантий или права предъявлять претензии. Окончательные условия оформляются работодателем в установленном порядке.</p><p>Дата: ____________________ Подпись: ____________________</p><p>Расшифровка подписи: ____________________________________</p><button onclick="window.print()">Распечатать / сохранить PDF</button></main></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>COFFEEMAN · Согласие на трудоустройство</title>
+  <link rel="stylesheet" href="illustrations.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #122247;
+      --muted: #475978;
+      --blue: #0752d5;
+      --border: #dee7f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f4f7fc;
+      color: var(--ink);
+      font: 1rem/1.55 system-ui, sans-serif;
+    }
+    .page {
+      width: min(100% - 2rem, 68rem);
+      margin-inline: auto;
+    }
+    .site-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      min-height: 4.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      color: var(--ink);
+      font-weight: 850;
+      letter-spacing: .075em;
+      text-decoration: none;
+    }
+    a { color: var(--blue); }
+    a:focus-visible, button:focus-visible {
+      outline: 3px solid var(--blue);
+      outline-offset: 4px;
+    }
+    main { padding-block: 1.5rem 3.5rem; }
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, .7fr);
+      align-items: center;
+      gap: clamp(1rem, 4vw, 3rem);
+      padding: clamp(1.25rem, 5vw, 3.5rem);
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 1.75rem;
+    }
+    .intro h1 {
+      max-width: 16ch;
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.1;
+      letter-spacing: -.035em;
+    }
+    .intro p {
+      max-width: 46ch;
+      margin-block: 1rem 1.3rem;
+      color: var(--muted);
+    }
+    .consent-art {
+      width: 100%;
+      max-width: 24rem;
+      margin-inline: auto;
+    }
+    .print-button {
+      min-height: 2.75rem;
+      padding: .65rem 1rem;
+      border: 0;
+      border-radius: .8rem;
+      background: var(--blue);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+    }
+    .print-button:hover { background: #0344b7; }
+    .instructions { margin-block: 2rem; }
+    .instructions h2 {
+      margin: 0 0 1rem;
+      font-size: clamp(1.4rem, 3vw, 1.9rem);
+      line-height: 1.2;
+    }
+    .methods {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+    .method {
+      padding: 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      background: #fff;
+    }
+    .method h3 { margin: 0 0 .4rem; font-size: 1.15rem; }
+    .method p, .method ol { margin: 0; color: var(--muted); }
+    .method ol { padding-inline-start: 1.25rem; }
+    .method li + li { margin-top: .3rem; }
+    .demo-note { margin: .75rem 0 0; color: var(--muted); }
+    .paper {
+      max-width: 50rem;
+      margin-inline: auto;
+      padding: clamp(1.25rem, 6vw, 3.25rem);
+      border: 1px solid var(--border);
+      border-radius: 1.2rem;
+      background: #fff;
+    }
+    .paper h2 {
+      margin: 0 0 1.4rem;
+      text-align: center;
+      font-size: clamp(1.25rem, 3vw, 1.8rem);
+      line-height: 1.25;
+    }
+    .paper p { margin: 1rem 0 0; }
+    .field {
+      display: block;
+      break-inside: avoid;
+      margin-top: .8rem;
+    }
+    .field-name { font-weight: 600; }
+    .write-line {
+      display: block;
+      min-height: 1.7rem;
+      border-bottom: 1px solid #62708a;
+    }
+    .signature {
+      display: grid;
+      grid-template-columns: 1fr 1fr 2fr;
+      gap: .9rem;
+      break-inside: avoid;
+      margin-top: .6rem;
+    }
+    @media screen and (max-width: 42rem) {
+      .intro, .methods { grid-template-columns: 1fr; }
+      .consent-art { max-width: 16rem; }
+    }
+    @media screen and (max-width: 26rem) {
+      .signature { grid-template-columns: 1fr 1fr; }
+      .signature .field:last-child { grid-column: 1 / -1; }
+    }
+    @page { size: A4; margin: 16mm; }
+    @media print {
+      body { background: #fff; color: #000; font: 11pt/1.4 system-ui, sans-serif; }
+      .screen-only { display: none !important; }
+      .page { width: auto; margin: 0; }
+      main { padding: 0; }
+      .paper { max-width: none; margin: 0; padding: 0; border: 0; }
+      .paper h2 { font-size: 16pt; }
+      .write-line { border-color: #000; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header page screen-only">
+    <a class="brand" href="./">COFFEEMAN</a>
+    <a href="./#form">К анкете</a>
+  </header>
+  <main class="page">
+    <section class="intro screen-only">
+      <div>
+        <h1>Согласие на трудоустройство</h1>
+        <p>Образец для родителя или законного представителя несовершеннолетнего кандидата. Перед заполнением уточните у работодателя должность и график работы.</p>
+        <button class="print-button" type="button" onclick="window.print()">Распечатать / сохранить PDF</button>
+      </div>
+      <img class="recruitment-art consent-art" src="assets/recruitment-consent.jpg" width="1254" height="1254" alt="">
+    </section>
+
+    <section class="instructions screen-only" aria-labelledby="instructions-title">
+      <h2 id="instructions-title">Как передать согласие</h2>
+      <div class="methods">
+        <section class="method">
+          <h3>Прикрепить к анкете</h3>
+          <ol>
+            <li>Распечатайте бланк. Родитель или законный представитель заполняет и подписывает его.</li>
+            <li>Сделайте чёткое фото или скан всей страницы.</li>
+            <li>Укажите возраст в <a href="./#form">анкете</a>, выберите «Прикреплю файл» и добавьте PDF, JPEG или PNG до 2 МБ.</li>
+          </ol>
+        </section>
+        <section class="method">
+          <h3>Передать лично</h3>
+          <p>В анкете выберите «Принесу на собеседование». Администратор свяжется с вами и назначит устное собеседование. Возьмите на встречу заполненный и подписанный бланк и передайте его администратору.</p>
+        </section>
+      </div>
+      <p class="demo-note">Если анкета открыта в деморежиме, используйте вымышленные данные и неподписанный тестовый файл.</p>
+    </section>
+
+    <article class="paper" aria-labelledby="paper-title">
+      <h2 id="paper-title">Согласие на трудоустройство несовершеннолетнего</h2>
+      <div class="field">
+        <span class="field-name">ФИО родителя или законного представителя</span>
+        <span class="write-line" aria-hidden="true"></span>
+      </div>
+      <div class="field">
+        <span class="field-name">ФИО несовершеннолетнего</span>
+        <span class="write-line" aria-hidden="true"></span>
+      </div>
+      <div class="field">
+        <span class="field-name">Дата рождения несовершеннолетнего</span>
+        <span class="write-line" aria-hidden="true"></span>
+      </div>
+      <div class="field">
+        <span class="field-name">Наименование работодателя (юридическое лицо или ИП)</span>
+        <span class="write-line" aria-hidden="true"></span>
+      </div>
+      <div class="field">
+        <span class="field-name">Должность и согласованный график работы</span>
+        <span class="write-line" aria-hidden="true"></span>
+        <span class="write-line" aria-hidden="true"></span>
+      </div>
+      <p>Я, указанный выше родитель (законный представитель), не возражаю против трудоустройства несовершеннолетнего и даю согласие на его работу на указанных условиях при соблюдении требований законодательства, в том числе требований по охране труда и ограничений по продолжительности рабочего времени. Работа не должна препятствовать получению образования.</p>
+      <p>Законные права и гарантии несовершеннолетнего сохраняются.</p>
+      <div class="signature">
+        <div class="field">
+          <span class="field-name">Дата</span>
+          <span class="write-line" aria-hidden="true"></span>
+        </div>
+        <div class="field">
+          <span class="field-name">Подпись</span>
+          <span class="write-line" aria-hidden="true"></span>
+        </div>
+        <div class="field">
+          <span class="field-name">Расшифровка подписи</span>
+          <span class="write-line" aria-hidden="true"></span>
+        </div>
+      </div>
+    </article>
+  </main>
+</body>
+</html>
