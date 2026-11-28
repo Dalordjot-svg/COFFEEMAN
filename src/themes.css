@@ -121,7 +121,7 @@
 .winter-snow { display: none; }
 
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-theme="winter"] .winter-snow {
+  :root[data-theme="winter"] body:not(:has(.is-simple)) .winter-snow {
     display: block;
     position: fixed;
     inset: 0;

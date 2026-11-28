@@ -1,5 +1,5 @@
 import {
-  ArrowDownUp, ArrowLeft, ArrowUpRight, Ban, BookOpen, Check, ChevronRight,
+  ArrowDownUp, ArrowLeft, ArrowUpRight, Ban, Bell, BookOpen, Check, ChevronRight,
   CircleAlert, ClipboardList, Clock3, Ellipsis, ImageOff, LayoutGrid, Minus, Plus,
   Search, Send, Sofa, UserRound, Users, X,
 } from 'lucide-react';
@@ -20,6 +20,9 @@ type OrdersProps = {
   state: State;
   user: Session;
   execute: (command: Command) => Promise<unknown>;
+  simple: boolean;
+  notify: () => void;
+  unread: boolean;
   verifyServedRemoval?: () => Promise<void>;
   screen: OrdersScreen;
   navigate: (screen: OrdersScreen) => void;
@@ -282,14 +285,14 @@ function FormError({ text }: { text: string }) {
 }
 
 export function Orders(props: OrdersProps) {
-  const { screen, navigate, state } = props;
+  const { screen, navigate, state, simple } = props;
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [sort, setSort] = useState<SortOrder>('recent');
   const now = useMinute();
   const alerts = useMemo(() => new Map(orderAlerts(state, now).map((alert) => [alert.orderId, alert])), [state, now]);
 
   if (screen.page === 'orders') {
-    return <OrderList {...props} scope={scope} setScope={setScope} sort={sort} setSort={setSort} alerts={alerts} />;
+    return <OrderList {...props} scope={scope} setScope={setScope} sort={simple ? 'recent' : sort} setSort={setSort} alerts={alerts} />;
   }
 
   if (screen.page === 'tables') return <Tables {...props} initialTab={screen.initialTab} now={now} alerts={alerts} />;
@@ -306,7 +309,7 @@ export function Orders(props: OrdersProps) {
   return <Editor key={order.id} {...props} order={order} from={screen.from} now={now} alert={alerts.get(order.id)} />;
 }
 
-function OrderList({ state, user, navigate, openQuick, scope, setScope, sort, setSort, alerts }: OrdersProps & {
+function OrderList({ state, user, navigate, openQuick, simple, notify, unread, scope, setScope, sort, setSort, alerts }: OrdersProps & {
   scope: 'mine' | 'all';
   setScope: (value: 'mine' | 'all') => void;
   sort: SortOrder;
@@ -348,27 +351,30 @@ function OrderList({ state, user, navigate, openQuick, scope, setScope, sort, se
 
   return (
     <main className="order-screen" aria-label="Раздел заказов">
-      <OrderHeader heading="Заказы" actions={<>
+      <OrderHeader heading="Заказы" actions={simple ? <button type="button" className="order-icon header-icon" aria-label="Уведомления" onClick={notify}>
+        <Bell size={19} />{unread && <i />}
+      </button> : <>
         <OrderIconButton label="Сортировать заказы" onClick={() => setSortOpen(true)}><ArrowDownUp size={18} /></OrderIconButton>
         <OrderIconButton label="Быстрые действия" onClick={openQuick}><Ellipsis size={22} /></OrderIconButton>
       </>} />
+      {simple && <button type="button" className="primary order-new-simple" onClick={() => navigate({ page: 'tables' })}><Plus size={20} />Новый заказ</button>}
       <div className="order-segments" role="group" aria-label="Заказы по официанту">
         <button type="button" aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>Мои</button>
         <button type="button" aria-pressed={scope === 'all'} onClick={() => setScope('all')}>Все</button>
       </div>
       {grouped.length ? grouped.map((group) => (
         <section className="order-group" key={group.id} aria-labelledby={'group-' + group.id}>
-          <h2 id={'group-' + group.id}>{group.label}</h2>
-          <div className="order-grid">
+          <h2 id={'group-' + group.id} className={simple && grouped.length === 1 ? 'order-visually-hidden' : undefined}>{group.label}</h2>
+          <div className={simple ? 'order-grid order-grid--simple' : 'order-grid'}>
             {group.orders.map((order) => (
-              <OrderCard key={order.id} state={state} order={order} showWaiter={scope === 'all'} alert={alerts.get(order.id)}
+              <OrderCard key={order.id} state={state} order={order} simple={simple} showWaiter={scope === 'all'} alert={alerts.get(order.id)}
                 open={() => navigate({ page: 'order', orderId: order.id, from: 'orders' })} />
             ))}
           </div>
         </section>
       )) : <OrderEmpty>Активных заказов пока нет</OrderEmpty>}
-      <button type="button" aria-label="Новый заказ" className="order-fab" onClick={() => navigate({ page: 'tables' })}><Plus size={28} /></button>
-      {sortOpen && <OrderSheet title="Сортировка заказов" onClose={() => setSortOpen(false)}>
+      {!simple && <button type="button" aria-label="Новый заказ" className="order-fab" onClick={() => navigate({ page: 'tables' })}><Plus size={28} /></button>}
+      {!simple && sortOpen && <OrderSheet title="Сортировка заказов" onClose={() => setSortOpen(false)}>
         <div className="order-sheet-list">
           {(Object.entries(sorts) as Array<[SortOrder, string]>).map(([value, label]) =>
             <button type="button" className="order-sheet-row" key={value} aria-pressed={sort === value} onClick={() => { setSort(value); setSortOpen(false); }}>
@@ -380,20 +386,31 @@ function OrderList({ state, user, navigate, openQuick, scope, setScope, sort, se
   );
 }
 
-function OrderCard({ state, order, alert, showWaiter, open }: {
+function OrderCard({ state, order, alert, simple, showWaiter, open }: {
   state: State;
   order: Order;
   alert?: OrderAlert;
+  simple: boolean;
   showWaiter: boolean;
   open: () => void;
 }) {
   const items = orderItems(order);
   const appearance = orderAppearance(order, alert);
+  const total = (items.some(item => item.pricePending) ? 'От ' : '') + formatCurrency(orderTotal(order));
+  const waiter = state.users[order.waiterId]?.name ?? 'Официант';
+  if (simple) return <button type="button" className={'order-card order-card--simple tone-' + appearance.color} onClick={open}>
+    <span className="order-simple-copy">
+      <strong>{orderTitle(order)}</strong>
+      <small>{appearance.label}{showWaiter ? ' · ' + waiter : ''}</small>
+    </span>
+    <strong className="order-simple-total">{total}</strong>
+    <ChevronRight size={16} aria-hidden="true" />
+  </button>;
   return (
     <button type="button" className={'order-card tone-' + appearance.color} onClick={open}>
       <div className="order-card-heading"><strong>{orderTitle(order)}</strong><time dateTime={new Date(order.createdAt).toISOString()}>{compactTime.format(order.createdAt)}</time></div>
       <div className="order-card-status">{appearance.label}</div>
-      {showWaiter && <div className="order-card-waiter"><UserRound size={13} />{state.users[order.waiterId]?.name ?? 'Официант'}</div>}
+      {showWaiter && <div className="order-card-waiter"><UserRound size={13} />{waiter}</div>}
       <ul className="order-card-items">
         {items.slice(0, 3).map((item) => <li key={item.id}>{item.name}{item.quantity > 1 ? ' × ' + item.quantity : ''}</li>)}
         {items.length > 3 && <li className="order-card-extra">Ещё {items.length - 3}</li>}
@@ -401,7 +418,7 @@ function OrderCard({ state, order, alert, showWaiter, open }: {
       </ul>
       <span className="order-card-footer">
         <span className="order-card-guests" aria-label={'Гостей ' + order.guestIds.length}><Users size={15} />{order.guestIds.length}</span>
-        <strong>{items.some(item => item.pricePending) ? 'От ' : ''}{formatCurrency(orderTotal(order))}</strong>
+        <strong>{total}</strong>
       </span>
     </button>
   );
@@ -515,7 +532,7 @@ function FreeTables({ state, order, busy, onChoose }: {
   </>;
 }
 
-function Editor({ state, user, execute, verifyServedRemoval, navigate, order, from, now, alert }: OrdersProps & {
+function Editor({ state, user, execute, simple, verifyServedRemoval, navigate, order, from, now, alert }: OrdersProps & {
   order: Order;
   from?: 'tables' | 'orders';
   now: number;
@@ -585,7 +602,7 @@ function Editor({ state, user, execute, verifyServedRemoval, navigate, order, fr
     <main className="order-screen order-screen--full order-editor">
       <OrderHeader heading={orderTitle(order)} caption={'Гостей ' + order.guestIds.length + (!own ? ' · ' + (state.users[order.waiterId]?.name ?? 'Официант') : '')}
         onBack={() => navigate({ page: from ?? 'orders' })} actions={<>
-          {editable && !order.precheckAt && hasGuests && <OrderIconButton label="Открыть меню" onClick={() => catalog(order.guestIds[0])}><BookOpen size={20} /></OrderIconButton>}
+          {!simple && editable && !order.precheckAt && hasGuests && <OrderIconButton label="Открыть меню" onClick={() => catalog(order.guestIds[0])}><BookOpen size={20} /></OrderIconButton>}
           <OrderIconButton label="Действия заказа" onClick={() => setMenu('options')}><Ellipsis size={22} /></OrderIconButton>
         </>} />
       <div className={'order-editor-status tone-' + currentStatus.color}><span />{currentStatus.label}{!isClosed(order) && <time>{alert ? alert.minutes + ' мин' : elapsed(order.createdAt, now)}</time>}</div>
@@ -655,7 +672,7 @@ function Editor({ state, user, execute, verifyServedRemoval, navigate, order, fr
                 onClick={() => { void itemAction('unreadyItem', selected.id); }}>Вернуть в приготовление</button>
             </>}
         </div>}
-        {editable && !order.precheckAt && !selected.custom && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm
+        {editable && !order.precheckAt && !selected.custom && ['draft','preparing','ready'].includes(selected.status) && state.products[selected.productId] ? <ProductForm simple={simple}
           product={state.products[selected.productId]} state={state} order={order} guestId={selected.guestId} item={selected}
           busy={mutation.busy} error={mutation.error}
           submit={async (details) => {
@@ -783,7 +800,7 @@ function ProductImage({ product, compact = false }: { product: Product; compact?
   </div>;
 }
 
-function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps & {
+function Catalog({ state, user, execute, simple, navigate, order, screen }: OrdersProps & {
   order: Order;
   screen: Extract<OrdersScreen, { page: 'catalog' }>;
 }) {
@@ -851,7 +868,7 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
             const out = stockStatus(state, entry.id) === 'out';
             return <button type="button" className="order-product" key={entry.id} disabled={out || mutation.busy}
               onClick={() => { void chooseProduct(entry); }}>
-              <ProductImage product={entry} compact />
+              {!simple && <ProductImage product={entry} compact />}
               <span className="order-product-info"><strong>{entry.name}</strong><small>{out ? 'В стоп-листе' : formatCurrency(entry.price)}</small></span>
             </button>;
           })}
@@ -884,7 +901,7 @@ function Catalog({ state, user, execute, navigate, order, screen }: OrdersProps 
         }} />
       </OrderSheet>}
       {product && <OrderSheet title={product.name} onClose={() => { setProductId(null); mutation.clearError(); }} locked={mutation.busy}>
-        <ProductForm product={product} state={state} order={order} guestId={screen.guestId} busy={mutation.busy} error={mutation.error}
+        <ProductForm simple={simple} product={product} state={state} order={order} guestId={screen.guestId} busy={mutation.busy} error={mutation.error}
           submit={async ({ guestId, ...details }) => {
             if (await mutation.perform({ type: 'addItem', orderId: order.id, guestId, itemId: newId(), productId: product.id, ...details })) {
               setProductId(null);
@@ -928,12 +945,13 @@ function CustomItemForm({ initialName = '', item, busy, error, submit }: {
   </form>;
 }
 
-function ProductForm({ product, state, order, guestId, item, busy, error, submit, remove }: {
+function ProductForm({ product, state, order, guestId, item, busy, error, submit, remove, simple }: {
   product: Product;
   state: State;
   order: Order;
   guestId: string;
   item?: OrderItem;
+  simple: boolean;
   busy: boolean;
   error: string;
   submit: (details: ItemDetails) => Promise<void>;
@@ -979,7 +997,7 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
       });
     }}>
       <div className="order-product-preview">
-        <ProductImage product={product} />
+        {!simple && <ProductImage product={product} />}
         <div className="order-product-copy">
           <strong>{formatCurrency(selectedPrice + extraPrice)}</strong>
           {product.volume && <span>{product.volume}</span>}
@@ -987,7 +1005,7 @@ function ProductForm({ product, state, order, guestId, item, busy, error, submit
           <Stepper value={quantity} onChange={setQuantity} label="Количество" max={Math.max(1, Math.min(999, available ?? 999))} />
         </div>
       </div>
-      {product.description && <p className="order-sheet-caption">{product.description}</p>}
+      {!simple && product.description && <p className="order-sheet-caption">{product.description}</p>}
       {sizes.length > 0 && <div className="order-config">
         <button type="button" className="order-config-row" aria-expanded={expanded === 'size'} aria-controls={controlsId + '-size'}
           onClick={() => toggleOptions('size')}>

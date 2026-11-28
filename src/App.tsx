@@ -142,6 +142,7 @@ export default function App() {
   const delivered = useRef(new Set<string>())
   const runRestore = useRef<ReturnType<typeof store.restore> | undefined>(undefined)
   const admin = session?.role === 'admin'
+  const simple = !admin && preferences.simple
   const active = session && state.users[session.userId]
   const deactivated = active?.active === false
   const demo = store.mode === 'demo'
@@ -152,7 +153,9 @@ export default function App() {
     runRestore.current.then(value => {
       if (subscribed) {
         setSession(value)
-        setPreferences(loadPreferences(value?.userId))
+        const stored = loadPreferences(value?.userId)
+        setPreferences(stored)
+        if (value?.role === 'waiter' && stored.simple) setScreen({page: 'orders'})
         setRemovalEnabled(Boolean(value && hasRemovalCredential(value.userId)))
       }
     }).catch(err => {
@@ -243,11 +246,19 @@ export default function App() {
     const back = (event: PopStateEvent) => {
       const target = event.state?.coffeemanScreen as Screen | undefined
       setModal(undefined)
+      if (simple && target?.page === 'profile' && (target.view === 'stats' || target.view === 'history')) {
+        setScreen({page: 'profile'})
+        return
+      }
+      if (simple && (!target || target.page === 'home')) {
+        setScreen({page: 'orders'})
+        return
+      }
       setScreen(target ?? {page: 'home'})
     }
     window.addEventListener('popstate', back)
     return () => window.removeEventListener('popstate', back)
-  }, [])
+  }, [simple])
 
   const navigate = (target: Screen, reset = false) => {
     setModal(undefined)
@@ -311,9 +322,10 @@ export default function App() {
   if (!session) return <><Login startupError={error} onInstall={openGuide} onLogin={value => {
     setSeen(Date.now())
     setSession(value)
-    setPreferences(loadPreferences(value.userId))
+    const stored = loadPreferences(value.userId)
+    setPreferences(stored)
     setRemovalEnabled(hasRemovalCredential(value.userId))
-    navigate({page: 'home'}, true)
+    navigate({page: value.role === 'waiter' && stored.simple ? 'orders' : 'home'}, true)
   }} />{installDialog}</>
 
   if (deactivated) return <main className="main-page app-shell"><h1>Доступ приостановлен</h1><p className="sheet-note">Обратитесь к администратору заведения.</p><button className="secondary" onClick={() => void logout()}>Выйти</button></main>
@@ -322,12 +334,13 @@ export default function App() {
   const withNav = !admin && !!tab
   const orderView = screen.page === 'orders' || screen.page === 'tables' || screen.page === 'order' || screen.page === 'catalog'
   const showOrders = orderView && (!admin || screen.page === 'order' || screen.page === 'catalog')
+  const unread = visibleNotices.some(notice => notice.at > seen) || alerts.length > 0
   const appearanceSettings = <AppearanceSettings {...appearance} />
   const notificationSettings = <SystemNotificationSettings permission={systemNotifications.permission} pending={systemNotifications.pending} feedback={systemNotifications.feedback}
     onEnable={() => { void systemNotifications.runTest(preferences.sound, preferences.vibration, true) }}
     onTest={() => { void systemNotifications.runTest(preferences.sound, preferences.vibration, false) }}
     onInstall={() => { setModal(undefined); openGuide?.() }} />
-  return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`}>
+  return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${simple ? 'is-simple' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
       <button type="button" onClick={openNotifications}>Уведомления {visibleNotices.filter(n=>n.at>seen).length || ''}</button>
@@ -335,7 +348,7 @@ export default function App() {
     </div> :
       <>
         {screen.page === 'home' && <Home state={state} user={session} now={now} connection={connection} connected={connected}
-          notify={openNotifications} unread={visibleNotices.some(notice => notice.at > seen) || alerts.length > 0}
+          notify={openNotifications} unread={unread}
           showConnection={preferences.connection} openOrder={openOrder} quick={() => setModal('quick')} />}
         {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
         {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
@@ -344,11 +357,12 @@ export default function App() {
           connection={connection} period={period} setPeriod={setPeriod} onInstall={openGuide} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
       </>}
     {(!admin || showOrders) && <div hidden={!showOrders}>
-      <Orders state={state} user={session} execute={execute} verifyServedRemoval={removalEnabled ? () => confirmServedRemoval(session.userId) : undefined}
+      <Orders state={state} user={session} execute={execute} simple={simple} notify={openNotifications} unread={unread}
+        verifyServedRemoval={removalEnabled ? () => confirmServedRemoval(session.userId) : undefined}
         screen={orderView ? screen : {page: 'orders'}} navigate={orderNavigate} openQuick={() => setModal('quick')} />
     </div>}
     {withNav && <nav className="bottom-nav" aria-label="Основная навигация">
-      {tabs.map(({ page, title, Icon }) => <button type="button" key={page} aria-current={tab === page ? 'page' : undefined} onClick={() => {
+      {tabs.filter(item => !simple || item.page !== 'home').map(({ page, title, Icon }) => <button type="button" key={page} aria-current={tab === page ? 'page' : undefined} onClick={() => {
         if (tab !== page || (screen.page === 'profile' && screen.view !== 'profile')) navigate({page})
       }}><Icon size={21} strokeWidth={tab === page ? 2.4 : 1.8} /><span>{title}</span></button>)}
     </nav>}

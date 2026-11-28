@@ -1,0 +1,50 @@
+import { expect, test } from '@playwright/test'
+import { createTableOrder, openCatalog, signIn, tab } from './flows'
+
+test('упрощённый режим сохраняется и позволяет провести заказ от создания до расчёта', async ({ page }) => {
+  await signIn(page)
+  const nav = page.getByRole('navigation')
+  const settings = async () => {
+    await tab(page, 'Профиль')
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click()
+    return page.getByRole('switch', { name: 'Упрощённый режим' })
+  }
+
+  const toggle = await settings()
+  await expect(toggle).not.toBeChecked()
+  await toggle.check()
+  await expect(nav.getByRole('button')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Системные уведомления' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Тема оформления' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Назад в профиль' }).click()
+  await expect(page.getByRole('button', { name: 'История заказов' })).toHaveCount(0)
+  await tab(page, 'Стоп-лист')
+  await expect(page.getByRole('searchbox', { name: 'Поиск товара' })).toBeVisible()
+  await tab(page, 'Заказы')
+  await expect(page.getByRole('button', { name: 'Сортировать заказы' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Уведомления' })).toBeVisible()
+  await expect(page.locator('.order-card--simple').first()).toBeVisible()
+
+  await createTableOrder(page, 12)
+  await openCatalog(page)
+  await page.getByRole('searchbox', { name: 'Поиск позиций' }).fill('Чизкейк')
+  const item = page.getByRole('button', { name: /Чизкейк/ })
+  await expect(item).toBeVisible()
+  await expect(item.locator('.order-product-image')).toHaveCount(0)
+  await item.click()
+  await page.getByRole('button', { name: 'Закрыть меню' }).click()
+  await page.getByRole('button', { name: 'Отправить на кухню' }).click()
+  await page.getByRole('button', { name: 'Готово: Чизкейк' }).click()
+  await page.getByRole('button', { name: 'Выдать: Чизкейк' }).click()
+  await page.getByRole('button', { name: 'К расчёту' }).click()
+  await page.getByRole('button', { name: 'Закрыть заказ' }).press('Enter')
+  await expect(page.getByText('Завершён', { exact: true })).toBeVisible()
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Заказы', exact: true })).toBeVisible()
+  await settings()
+  await expect(toggle).toBeChecked()
+  await toggle.uncheck()
+  await expect(nav.getByRole('button')).toHaveCount(4)
+  await expect(page.getByRole('group', { name: 'Тема оформления' })).toBeVisible()
+})

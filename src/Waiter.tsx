@@ -15,7 +15,7 @@ import { ActionRow, Empty, IconButton, Segmented, Sheet, money } from './ui'
 type Period = 'day' | 'week' | 'month'
 export type ProfileScreen = 'profile' | 'stats' | 'history' | 'settings'
 export type Preferences = typeof defaultPreferences
-export const defaultPreferences = { sound: true, vibration: true, ready: true, delay: true, stock: true, connection: true }
+export const defaultPreferences = { sound: true, vibration: true, ready: true, delay: true, stock: true, connection: true, simple: false }
 
 export function Toggle({ text, detail, icon, value, onChange }: {text: string; detail?: string; icon?: ReactNode; value: boolean; onChange: (value: boolean) => void}) {
   return <label className="toggle-row">{icon}<span className="toggle-caption">{text}{detail && <small>{detail}</small>}</span>
@@ -185,6 +185,7 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
   const [info, setInfo] = useState(false)
   const [configuringRemoval, setConfiguringRemoval] = useState(false)
   const [removalError, setRemovalError] = useState('')
+  const simple = preferences.simple
   const title = { profile: 'Профиль', stats: 'Моя статистика', history: 'История заказов', settings: 'Настройки' }
   const name = state.users[user.userId]?.name ?? user.name
   const updateRemoval = async (enabled: boolean) => {
@@ -212,10 +213,12 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
     </header>
     {screen === 'profile' && <>
       <div className="profile-identity"><span className="avatar" aria-hidden="true">{[...name][0]?.toLocaleUpperCase('ru')}</span><strong>{name}</strong><small>Официант</small></div>
-      <Metric label="Личные продажи сегодня" value={money(today.sales)} detail={`Заказов: ${today.orders} · Гостей: ${today.guests} · Средний чек: ${money(today.average)}`} />
+      {!simple && <Metric label="Личные продажи сегодня" value={money(today.sales)} detail={`Заказов: ${today.orders} · Гостей: ${today.guests} · Средний чек: ${money(today.average)}`} />}
       <div className="action-list panel">
-        <ActionRow icon={<ChartNoAxesColumnIncreasing size={18} />} label="Моя статистика" onClick={() => navigate('stats')} />
-        <ActionRow icon={<ClipboardList size={18} />} label="История заказов" onClick={() => navigate('history')} />
+        {!simple && <>
+          <ActionRow icon={<ChartNoAxesColumnIncreasing size={18} />} label="Моя статистика" onClick={() => navigate('stats')} />
+          <ActionRow icon={<ClipboardList size={18} />} label="История заказов" onClick={() => navigate('history')} />
+        </>}
         <ActionRow icon={<Bell size={18} />} label="Уведомления" onClick={notify} />
         <ActionRow icon={<Settings2 size={18} />} label="Настройки" onClick={() => navigate('settings')} />
       </div>
@@ -233,22 +236,26 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
       </button>,
     )}{history.length === 0 && <div className="panel"><Empty icon={<ClipboardList size={21} />} title="За этот период заказов нет" /></div>}</div>}
     {screen === 'settings' && <>
-      {appearanceSettings}
+      <div className="settings-group panel">
+        <Toggle text="Упрощённый режим" detail="Заказы, стоп-лист и основные настройки" icon={<ClipboardList size={18} />}
+          value={simple} onChange={value => setPreference('simple', value)} />
+      </div>
+      {!simple && appearanceSettings}
       {notificationSettings}
-      <div className="settings-group panel">{preferenceRows.map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />}
+      <div className="settings-group panel">{preferenceRows.filter(({key}) => !simple || key === 'sound' || key === 'vibration' || key === 'ready').map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />}
         detail={key === 'connection' ? connection : key === 'vibration' && !navigator.vibrate ? 'В этом браузере вибрация доступна только через системные уведомления' : undefined}
         value={preferences[key]} onChange={value => setPreference(key, value)} />)}
         <ActionRow icon={<Bell size={18} />} label="Проверить оповещения" onClick={testSignals} />
       </div>
-      <div className="settings-group panel">
+      {!simple && <div className="settings-group panel">
         <Toggle text="Удаление выданных позиций" detail={configuringRemoval ? 'Ожидает подтверждения на устройстве…' : 'В тестировании · Face ID, отпечаток или код устройства'}
           icon={<Smartphone size={18} />} value={removalEnabled} onChange={value => { if (!configuringRemoval) void updateRemoval(value) }} />
         {removalError && <p className="sheet-note" role="alert">{removalError}</p>}
-      </div>
-      <div className="action-list panel">
+      </div>}
+      {!simple && <div className="action-list panel">
         {onInstall && <ActionRow icon={<Smartphone size={18} />} label="Как установить приложение" onClick={onInstall} />}
         <ActionRow icon={<Info size={18} />} label="О приложении" detail="Версия 1.0.0" onClick={() => setInfo(true)} />
-      </div>
+      </div>}
     </>}
     {info && <Sheet title="О приложении" onClose={() => setInfo(false)}><p>COFFEEMAN — Waiter System</p><p className="sheet-note">Версия 1.0.0. Рабочее пространство для заказов, остатков и статистики.</p><button className="secondary" onClick={() => setInfo(false)}><X size={16} /> Закрыть</button></Sheet>}
   </main>

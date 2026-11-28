@@ -741,3 +741,21 @@ html:has(.order-sheet[open]) { overflow: hidden; }
 .order-item-entry + .order-item-entry { border-top: 1px solid var(--order-edge); }
 .order-item-entry .order-item-row { flex: 1; min-width: 0; }
 .order-item-quick { flex: 0 0 auto; min-width: 60px; padding-inline: 6px; border-inline-start: 1px solid var(--order-edge); font-size: 12px; font-weight: 700; color: var(--green, #60d186); }
+
+.order-grid--simple { grid-template-columns: 1fr; }
+.order-card--simple {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 9px 12px;
+}
+.order-simple-copy { display: grid; gap: 3px; overflow-wrap: anywhere; }
+.order-simple-copy strong { color: var(--order-tone); font-size: 15px; }
+.order-simple-copy small { color: var(--order-muted); font-size: 12px; }
+.order-simple-total { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.order-card--simple > svg { color: var(--order-muted); }
+.order-new-simple { width: 100%; }
+.is-simple .order-product { min-height: 68px; }
+.is-simple .order-product-preview { grid-template-columns: minmax(0, 1fr); }
