@@ -24,6 +24,7 @@ type Props = {
   onLogout: () => void
   connection: string
   onlineUserIds: ReadonlySet<string>
+  appearanceSettings: ReactNode
 }
 
 type PriceDraft = Omit<PriceOption, 'price'> & { price: string }
@@ -240,7 +241,7 @@ function Catalog({ state, open, execute }: { state: State; open: (dialog: Dialog
         <button type="button" className="admin-add" onClick={() => open({ kind: 'product' })}><Plus size={19} />Добавить товар</button>
         <button type="button" className="admin-add" onClick={() => open({ kind: 'import' })}><Upload size={17} />Импорт меню</button>
       </div>
-      <button type="button" className="admin-add" style={{color:'#ff7777'}} onClick={() => {setClearing(!clearing);setConfirmed(false);setSlide(0);setFailure('')}}>Удалить все позиции</button>
+      <button type="button" className="admin-add" style={{color:'var(--theme-action-danger, #ff7777)'}} onClick={() => {setClearing(!clearing);setConfirmed(false);setSlide(0);setFailure('')}}>Удалить все позиции</button>
       {clearing && <div className="admin-panel" style={{padding:16}}>
         <p>Все товары будут архивированы. История заказов сохранится.</p>
         <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={e=>{setConfirmed(e.target.checked);setSlide(0)}} /> Подтверждаю очистку каталога</label>
@@ -797,7 +798,7 @@ function SystemSettings({ settings, execute }: {settings: Settings; execute: Pro
   </>
 }
 
-export default function Admin({ state, user, execute, openOrder, onLogout, connection, onlineUserIds }: Props) {
+export default function Admin({ state, user, execute, openOrder, onLogout, connection, onlineUserIds, appearanceSettings }: Props) {
   const [page, setPage] = useState<Page>('overview')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -834,7 +835,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'orders' && <ListFilter className="admin-heading-icon" aria-hidden="true" size={21} />}
       </header>
       <div className="admin-page" key={page}>
-        {page === 'overview' && <div style={{display:'grid',gap:8,marginBottom:12}}><button className="admin-add" onClick={()=>navigate('reports')}>Отчёты и закрытие дня</button><button className="admin-add" style={{color:'#ff7777'}} onClick={()=>navigate('reports')}>Аварийные операции</button></div>}
+        {page === 'overview' && <div style={{display:'grid',gap:8,marginBottom:12}}><button className="admin-add" onClick={()=>navigate('reports')}>Отчёты и закрытие дня</button><button className="admin-add" style={{color:'var(--theme-action-danger, #ff7777)'}} onClick={()=>navigate('reports')}>Аварийные операции</button></div>}
         {page === 'overview' && <Overview state={state} open={setDialog} navigate={navigate} />}
         {page === 'catalog' && <Catalog state={state} open={setDialog} execute={execute} />}
         {page === 'floor' && <Floor state={state} open={setDialog} />}
@@ -842,7 +843,7 @@ export default function Admin({ state, user, execute, openOrder, onLogout, conne
         {page === 'orders' && <Orders state={state} open={setDialog} />}
         {page === 'reports' && <DayReports state={state} execute={execute} />}
         {page === 'audit' && <Audit state={state} />}
-        {page === 'settings' && <SystemSettings settings={state.settings} execute={execute} />}
+        {page === 'settings' && <>{appearanceSettings}<SystemSettings settings={state.settings} execute={execute} /></>}
         {page === 'more' && <>
           <div className="admin-panel">
             <ActionRow icon={<ClipboardList size={19} />} label="Заказы" detail="Статусы и назначение официантов" onClick={() => navigate('orders')} />
@@ -879,5 +880,5 @@ function DayReports({state,execute}: Pick<Props,'state'|'execute'>) {
  const from=state.dayOpenedAt??state.dayClosedAt??new Date().setHours(0,0,0,0);
  const paid=entries(state.orders).filter(o=>o.closedAt!==undefined && o.closedAt>=from && !o.canceledAt);
  const run=async()=>{setBusy(true);setError('');try{await execute({type:closed?'openDay':'closeDay'});setConfirm(false)}catch(e){setError(message(e))}finally{setBusy(false)}};
- return <section className="admin-report"><h2>{closed?'День закрыт':'Текущий рабочий день'}</h2>{!closed&&<><p>Выручка по закрытым заказам: <strong>{rubles.format(paid.reduce((s,o)=>s+orderTotal(o),0))}</strong></p><p>Закрытых заказов: {paid.length} · Активных: {active}</p></>}{!closed&&active>0&&<p>Завершите все активные заказы перед закрытием дня.</p>}<button type="button" disabled={busy||(!closed&&active>0)} onClick={()=>closed?void run():setConfirm(true)}>{closed?'Открыть новый день':'Закрыть день'}</button>{confirm&&!closed&&<><p>Подтвердите закрытие дня. История сохранится, новые заказы будут заблокированы.</p><button disabled={busy} onClick={()=>void run()}>Подтвердить закрытие</button><button onClick={()=>setConfirm(false)}>Отмена</button></>}{error&&<p role="alert">{error}</p>}{!closed&&<div style={{display:'grid',gap:8,margin:'20px 0'}}><h2>Аварийные операции</h2><button className="admin-add" style={{color:'#ff7777'}} onClick={()=>setEmergency(!emergency)}>Досрочно закрыть день</button>{emergency&&<><p>Открытые заказы сохранятся неоплаченными. Новые заказы будут заблокированы.</p><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value)} placeholder="PIN-код" aria-label="PIN-код"/><button className="admin-add" style={{color:'#ff7777'}} disabled={busy||pin.length!==4} onClick={()=>void emergencyRun()}>Подтвердить аварийное закрытие</button><button className="admin-add" onClick={()=>{setEmergency(false);setPin('')}}>Отмена</button></>}</div>}<h2>История отчётов</h2>{Object.values(state.dayReports??{}).sort((a,b)=>b.at-a.at).map(report=><article key={report.at}><strong>{formatTime(report.at)}</strong><p>{rubles.format(report.revenue)} · {report.count} заказов</p>{report.emergency&&<p>Аварийное закрытие · незавершённых: {report.unfinishedIds?.length??0}</p>}</article>)}</section>
+ return <section className="admin-report"><h2>{closed?'День закрыт':'Текущий рабочий день'}</h2>{!closed&&<><p>Выручка по закрытым заказам: <strong>{rubles.format(paid.reduce((s,o)=>s+orderTotal(o),0))}</strong></p><p>Закрытых заказов: {paid.length} · Активных: {active}</p></>}{!closed&&active>0&&<p>Завершите все активные заказы перед закрытием дня.</p>}<button type="button" disabled={busy||(!closed&&active>0)} onClick={()=>closed?void run():setConfirm(true)}>{closed?'Открыть новый день':'Закрыть день'}</button>{confirm&&!closed&&<><p>Подтвердите закрытие дня. История сохранится, новые заказы будут заблокированы.</p><button disabled={busy} onClick={()=>void run()}>Подтвердить закрытие</button><button onClick={()=>setConfirm(false)}>Отмена</button></>}{error&&<p role="alert">{error}</p>}{!closed&&<div style={{display:'grid',gap:8,margin:'20px 0'}}><h2>Аварийные операции</h2><button className="admin-add" style={{color:'var(--theme-action-danger, #ff7777)'}} onClick={()=>setEmergency(!emergency)}>Досрочно закрыть день</button>{emergency&&<><p>Открытые заказы сохранятся неоплаченными. Новые заказы будут заблокированы.</p><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value)} placeholder="PIN-код" aria-label="PIN-код"/><button className="admin-add" style={{color:'var(--theme-action-danger, #ff7777)'}} disabled={busy||pin.length!==4} onClick={()=>void emergencyRun()}>Подтвердить аварийное закрытие</button><button className="admin-add" onClick={()=>{setEmergency(false);setPin('')}}>Отмена</button></>}</div>}<h2>История отчётов</h2>{Object.values(state.dayReports??{}).sort((a,b)=>b.at-a.at).map(report=><article key={report.at}><strong>{formatTime(report.at)}</strong><p>{rubles.format(report.revenue)} · {report.count} заказов</p>{report.emergency&&<p>Аварийное закрытие · незавершённых: {report.unfinishedIds?.length??0}</p>}</article>)}</section>
 }

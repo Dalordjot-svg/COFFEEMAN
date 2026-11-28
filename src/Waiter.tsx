@@ -174,11 +174,12 @@ const preferenceRows = [
 ] as const
 
 export function Profile({ state, user, now, screen, navigate, preferences, setPreference, connection, period, setPeriod, onInstall, notify, openOrder, logout,
-  testSignals, removalEnabled, setRemovalEnabled }: {
+  testSignals, removalEnabled, setRemovalEnabled, appearanceSettings }: {
   state: State; user: Session; now: number; screen: ProfileScreen; navigate: (screen: ProfileScreen) => void; preferences: Preferences;
   setPreference: (key: keyof Preferences, value: boolean) => void; connection: string; period: Period; setPeriod: (period: Period) => void;
   onInstall?: () => void; notify: () => void; openOrder: (id: string) => void; logout: () => void;
   testSignals: () => void; removalEnabled: boolean; setRemovalEnabled: (enabled: boolean) => void;
+  appearanceSettings: ReactNode;
 }) {
   const [info, setInfo] = useState(false)
   const [configuringRemoval, setConfiguringRemoval] = useState(false)
@@ -231,6 +232,7 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
       </button>,
     )}{history.length === 0 && <div className="panel"><Empty icon={<ClipboardList size={21} />} title="За этот период заказов нет" /></div>}</div>}
     {screen === 'settings' && <>
+      {appearanceSettings}
       <div className="settings-group panel">{preferenceRows.map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />}
         detail={key === 'connection' ? connection : key === 'vibration' && !navigator.vibrate ? 'В этом браузере вибрация доступна только через системные уведомления' : undefined}
         value={preferences[key]} onChange={value => setPreference(key, value)} />)}

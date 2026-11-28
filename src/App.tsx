@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { AppearanceSettings, useAppearance } from './Appearance'
 import {
   Armchair, Ban, Bell, ClipboardList, FilePlus2, Home as HomeIcon,
   LoaderCircle, Plus, UserRound, WifiOff, X,
@@ -114,6 +115,7 @@ function Login({ onLogin, startupError, onInstall }: {onLogin: (session: Session
 }
 
 export default function App() {
+  const appearance = useAppearance()
   const [session, setSession] = useState<Session | null>(null)
   const [state, setState] = useState(emptyState)
   const [loading, setLoading] = useState(true)
@@ -304,12 +306,13 @@ export default function App() {
   const withNav = !admin && !!tab
   const orderView = screen.page === 'orders' || screen.page === 'tables' || screen.page === 'order' || screen.page === 'catalog'
   const showOrders = orderView && (!admin || screen.page === 'order' || screen.page === 'catalog')
+  const appearanceSettings = <AppearanceSettings {...appearance} />
   return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
       <button type="button" onClick={openNotifications}>Уведомления {visibleNotices.filter(n=>n.at>seen).length || ''}</button>
       {typeof Notification !== 'undefined' && Notification.permission === 'default' && <button type="button" onClick={()=>void Notification.requestPermission()}>Разрешить уведомления</button>}
-      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} onlineUserIds={onlineUsers} /></Suspense>
+      <Suspense fallback={<Loading />}><Admin state={state} user={session} execute={execute} openOrder={openOrder} onLogout={() => void logout()} connection={connection} onlineUserIds={onlineUsers} appearanceSettings={appearanceSettings} /></Suspense>
     </div> :
       <>
         {screen.page === 'home' && <Home state={state} user={session} now={now} connection={connection} connected={connected}
@@ -318,7 +321,7 @@ export default function App() {
         {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
         {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
           navigate={view => navigate({page: 'profile', view})} preferences={preferences} setPreference={updatePreference}
-          testSignals={testSignals} removalEnabled={removalEnabled} setRemovalEnabled={setRemovalEnabled}
+          testSignals={testSignals} removalEnabled={removalEnabled} setRemovalEnabled={setRemovalEnabled} appearanceSettings={appearanceSettings}
           connection={connection} period={period} setPeriod={setPeriod} onInstall={openGuide} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
       </>}
     {(!admin || showOrders) && <div hidden={!showOrders}>

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles.css'
+import './themes.css'
 
 // Keep the focused native input visible when the visual viewport shrinks.
 const viewport = window.visualViewport
@@ -72,7 +73,7 @@ function showSyncNotice(message: string, code: string, operationId = '') {
   }
   const close = document.createElement('button')
   close.textContent = 'Закрыть'
-  close.style.cssText = 'color:white;padding:10px'
+  close.style.cssText = 'color:inherit;padding:10px'
   close.onclick = () => { syncNotice.hidden = true }
   syncNotice.append(text, detail, copy, close)
   syncNotice.hidden = false
