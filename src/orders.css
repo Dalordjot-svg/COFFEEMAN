@@ -216,6 +216,7 @@
   background: rgba(var(--tone-rgb), .14);
 }
 .table-tile:active { transform: scale(.97); }
+.table-tile:disabled { opacity: .55; }
 
 .order-bottom {
   position: sticky;

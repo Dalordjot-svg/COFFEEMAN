@@ -84,6 +84,7 @@ const auditNames: Record<string, string> = {
   updateUser: 'Изменение сотрудника',
   assignOrder: 'Назначение официанта',
   createOrder: 'Создание заказа',
+  moveOrder: 'Пересадка за другой стол',
   addGuest: 'Добавление гостя',
   removeGuest: 'Удаление гостя',
   addItem: 'Добавление позиции',

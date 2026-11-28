@@ -1,7 +1,7 @@
 import {
   ArrowDownUp, ArrowLeft, ArrowUpRight, Ban, BookOpen, Check, ChevronRight,
   CircleAlert, ClipboardList, Clock3, Ellipsis, ImageOff, LayoutGrid, Minus, Plus,
-  Search, Send, UserRound, Users, X,
+  Search, Send, Sofa, UserRound, Users, X,
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -478,6 +478,31 @@ function Tables({ state, user, execute, navigate, now, initialTab, alerts }: Ord
   );
 }
 
+function FreeTables({ state, order, busy, onChoose }: {
+  state: State; order: Order; busy: boolean; onChoose: (tableId: string) => void;
+}) {
+  const occupied = new Set(entries(state.orders).filter(isActiveOrder).map(entry => entry.tableId));
+  const halls = entries(state.halls).filter(hall => !hall.archived).sort(sortByRank);
+  const currentHall = halls.find(hall => hall.id === order.hallId);
+  const orderedHalls = currentHall ? [currentHall, ...halls.filter(hall => hall.id !== currentHall.id)] : halls;
+  const freeTables = entries(state.tables).filter(table => !table.archived && !occupied.has(table.id)).sort(sortByRank);
+  const groups = orderedHalls.map(hall => ({ hall, tables: freeTables.filter(table => table.hallId === hall.id) }))
+    .filter(group => group.tables.length > 0);
+
+  if (!groups.length) return <OrderEmpty icon={<Sofa size={25} />}>Сейчас нет свободных столов</OrderEmpty>;
+
+  return <>
+    <p className="order-sheet-caption">Сейчас {orderTitle(order)}. Выберите свободный стол.</p>
+    {groups.map(({ hall, tables }) => <section key={hall.id} aria-label={hall.name}>
+      {halls.length > 1 && <div className="order-sheet-caption">{hall.name}</div>}
+      <div className="table-grid">
+        {tables.map(table => <button key={table.id} type="button" className="table-tile" disabled={busy}
+          onClick={() => onChoose(table.id)}>{table.name}</button>)}
+      </div>
+    </section>)}
+  </>;
+}
+
 function Editor({ state, user, execute, navigate, order, from, now, alert }: OrdersProps & {
   order: Order;
   from?: 'tables' | 'orders';
@@ -485,7 +510,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   alert?: OrderAlert;
 }) {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
-  const [menu, setMenu] = useState<'options' | 'cancel' | 'checkout' | null>(null);
+  const [menu, setMenu] = useState<'options' | 'cancel' | 'checkout' | 'move' | null>(null);
   const tap = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   useEffect(() => () => { if (tap.current) clearTimeout(tap.current.timer); }, []);
   const mutation = useMutations(execute);
@@ -647,7 +672,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
             {editable && (selected.status === 'draft' || selected.status === 'preparing' || selected.status === 'ready') && <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={() => { void itemAction('cancelItem', selected.id); }}><Ban size={17} />{selected.status === 'draft' ? 'Удалить позицию' : 'Отменить позицию'}</button>}
           </div>}
       </OrderSheet>}
-      {menu && <OrderSheet title={menu === 'checkout' ? 'Позиции для кассы' : menu === 'cancel' ? cancelLabel + '?' : 'Действия заказа'} onClose={closeMenu} locked={mutation.busy}>
+      {menu && <OrderSheet title={{ checkout: 'Позиции для кассы', cancel: cancelLabel + '?', move: 'Пересадить за другой стол', options: 'Действия заказа' }[menu]} onClose={closeMenu} locked={mutation.busy}>
         {menu === 'checkout' ? <div className="order-sheet-content">
           <div className="order-sheet-list">
             {items.map(item => <div className="order-checkout-line" key={item.id}>
@@ -662,6 +687,12 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
           <CloseOrderSwipe disabled={mutation.busy || !editable || !canCheckout} onComplete={async () => {
             if (await mutation.perform({ type: 'closeOrder', orderId: order.id })) closeMenu();
           }} />
+        </div> : menu === 'move' ? <div className="order-sheet-content">
+          <FormError text={mutation.error} />
+          {editable && order.tableId ? <FreeTables state={state} order={order} busy={mutation.busy} onChoose={async tableId => {
+            const fromTableId = order.tableId;
+            if (fromTableId && await mutation.perform({ type: 'moveOrder', orderId: order.id, fromTableId, tableId })) closeMenu();
+          }} /> : <OrderEmpty>Пересадка для этого заказа больше недоступна</OrderEmpty>}
         </div> : menu === 'cancel' ? <div className="order-sheet-content">
           <p className="order-sheet-caption">{unsent ? 'Черновик будет удалён из активных заказов.' : 'Невыданные позиции будут отменены, зарезервированный остаток освободится.'}</p>
           <FormError text={mutation.error} />
@@ -672,6 +703,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
         </div> : <div className="order-sheet-list">
           <div className="order-menu-info"><Clock3 size={18} />Создан в {compactTime.format(order.createdAt)}</div>
           <div className="order-menu-info"><UserRound size={18} />{state.users[order.waiterId]?.name ?? 'Официант'}</div>
+          {editable && order.tableId && <button type="button" className="order-sheet-row" onClick={() => { mutation.clearError(); setMenu('move'); }}><Sofa size={19} />Пересадить за другой стол</button>}
           {editable && !order.precheckAt && hasGuests && <button type="button" className="order-sheet-row" onClick={() => catalog(order.guestIds[0])}><Plus size={19} />Добавить позиции</button>}
           {editable && canPrecheck && !order.precheckAt && <button type="button" className="order-sheet-row" disabled={mutation.busy} onClick={async () => {
             if (await mutation.perform({ type: 'precheckOrder', orderId: order.id })) closeMenu();

@@ -29,6 +29,34 @@ function addCheesecake(execute: ReturnType<typeof fixture>['execute'], orderId: 
   execute({ type: 'addItem', orderId, guestId: 'guest-1', itemId, productId: 'cheesecake', quantity }, actor)
 }
 
+it('пересаживает активный заказ целиком и отклоняет занятие одного стола двумя заказами', () => {
+  const { execute, state } = fixture()
+  const orderId = 'order-move'
+  execute({ type: 'createOrder', orderId, tableId: 'table-12', guestCount: 2 })
+  execute({ type: 'createOrder', orderId: 'order-other', tableId: 'table-13', guestCount: 1 }, anna)
+  addCheesecake(execute, orderId)
+  execute({ type: 'sendOrder', orderId })
+  execute({ type: 'readyItem', orderId, itemId: 'cheesecake-one' })
+  const before = state()
+  const move = { type: 'moveOrder', orderId, fromTableId: 'table-12', tableId: 'table-bar-1' } as const
+  expect(() => execute(move, anna)).toThrow(/другому официанту/)
+  expect(() => execute({ ...move, tableId: 'table-13' })).toThrow(/активный заказ/)
+
+  execute(move)
+  const moved = state()
+  expect(moved.orders[orderId]).toEqual({ ...before.orders[orderId], tableId: 'table-bar-1', hallId: 'bar',
+    label: 'Стол Б1', updatedAt: moved.orders[orderId].updatedAt })
+  expect(moved.inventoryReservations).toEqual(before.inventoryReservations)
+  expect(Object.values(moved.notifications).find(notice => notice.orderId === orderId)?.message).toContain('Стол Б1')
+  expect(Object.values(moved.auditLogs).find(event => event.type === 'moveOrder')?.detail).toContain('Стол 12 → Бар · Стол Б1')
+  expect(() => execute({ ...move, orderId: 'order-other', fromTableId: 'table-13' }, anna)).toThrow(/активный заказ/)
+  expect(() => execute({ ...move, tableId: 'table-bar-2' })).toThrow(/Стол заказа уже изменился/)
+  execute({ type: 'createOrder', orderId: 'order-old-table', tableId: 'table-12', guestCount: 1 }, anna)
+  execute({ type: 'serveItem', orderId, itemId: 'cheesecake-one' })
+  execute({ type: 'closeOrder', orderId })
+  expect(() => execute({ ...move, fromTableId: 'table-bar-1', tableId: 'table-bar-2' })).toThrow(/завершено/)
+})
+
 it('проводит свою позицию без складского учёта и требует цену перед расчётом', () => {
   const { execute, state } = fixture()
   const orderId = 'custom-order'

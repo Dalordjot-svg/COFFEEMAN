@@ -62,6 +62,7 @@ export type Command =
   | { type: 'emergencyCloseDay'; pin: string }
   | { type: 'registerUser' }
   | { type: 'createOrder'; orderId: string; tableId?: string; tabName?: string; guestCount: number }
+  | { type: 'moveOrder'; orderId: string; fromTableId: string; tableId: string }
   | { type: 'addGuest' | 'removeGuest'; orderId: string; guestId: string }
   | { type: 'addItem'; orderId: string; guestId: string; itemId: string; productId: string; quantity: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
   | { type: 'addCustomItem'; orderId: string; guestId: string; itemId: string; name: string; comment: string; price?: number }
@@ -424,6 +425,16 @@ function editableOrder(state: State, session: Session, id: string): Order {
   return order
 }
 
+function freeTableLocation(state: State, tableId: string) {
+  checkId(tableId)
+  const table = state.tables[tableId]
+  const hall = table && state.halls[table.hallId]
+  requireCondition(table && hall && !table.archived && !hall.archived, 'Стол недоступен')
+  requireCondition(!entries(state.orders).some(order => order.tableId === table.id && isActiveOrder(order)), 'У стола уже есть активный заказ')
+  const label = /^стол\s/i.test(table.name) ? table.name : `Стол ${table.name}`
+  return { label, tableId: table.id, hallId: hall.id }
+}
+
 function itemIn(order: Order, itemId: string): OrderItem {
   checkId(itemId)
   const item = order.items[itemId]
@@ -635,13 +646,7 @@ export function applyCommand(previous: State, session: Session, command: Command
       let location: Pick<Order, 'label' | 'tableId' | 'hallId'>
       if (command.tableId !== undefined) {
         requireCondition(command.tabName === undefined, 'Выберите стол или именной таб')
-        checkId(command.tableId)
-        const table = state.tables[command.tableId]
-        const hall = table && state.halls[table.hallId]
-        requireCondition(table && hall && !table.archived && !hall.archived, 'Стол недоступен')
-        requireCondition(!entries(state.orders).some(order => order.tableId === table.id && isActiveOrder(order)), 'У стола уже есть активный заказ')
-        const label = /^стол\s/i.test(table.name) ? table.name : `Стол ${table.name}`
-        location = { label, tableId: table.id, hallId: table.hallId }
+        location = freeTableLocation(state, command.tableId)
       } else {
         location = { label: checkText(command.tabName, 'название таба', 80) }
       }
@@ -649,6 +654,24 @@ export function applyCommand(previous: State, session: Session, command: Command
       const guestIds = Array.from({ length: guests }, (_, index) => `guest-${index + 1}`)
       state.orders[orderId] = { ...location, id: orderId, waiterId: session.userId, guestIds, items: {},
         createdAt: stamp.now, updatedAt: stamp.now }
+      break
+    }
+    case 'moveOrder': {
+      const order = activeOrder(state, session, command.orderId)
+      requireCondition(order.tableId && order.tableId === command.fromTableId, 'Стол заказа уже изменился. Выберите стол заново')
+      const location = freeTableLocation(state, command.tableId)
+      const oldLabel = order.label
+      const oldHall = order.hallId ? state.halls[order.hallId]?.name : undefined
+      detail = order.hallId === location.hallId ? `${oldLabel} → ${location.label}` :
+        `${[oldHall, oldLabel].filter(Boolean).join(' · ')} → ${state.halls[location.hallId].name} · ${location.label}`
+      Object.assign(order, location)
+      const prefix = `${oldLabel} · `
+      for (const notice of entries(state.notifications)) {
+        if (notice.type === 'ready' && notice.orderId === order.id && notice.message.startsWith(prefix)) {
+          notice.message = `${location.label} · ${notice.message.slice(prefix.length)}`
+        }
+      }
+      orderId = order.id
       break
     }
     case 'addGuest':

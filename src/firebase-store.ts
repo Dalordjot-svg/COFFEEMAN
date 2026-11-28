@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app'
 import { get, getDatabase, onDisconnect, onValue, ref, remove, serverTimestamp, set, runTransaction } from 'firebase/database'
 import type { Database } from 'firebase/database'
-import { applyCommand, configureLocalVenue, emptyState, newId, normalizeState } from './domain'
+import { applyCommand, configureLocalVenue, DomainError, emptyState, newId, normalizeState } from './domain'
 import type { Command, Session } from './domain'
 import { asError, connectionSubscribe, deviceId, presenceExpiryMs, presencePulseMs } from './device-store'
 import type { Store, PresenceListener, ErrorListener } from './store'
@@ -93,12 +93,30 @@ export function createFirebaseStore(): Store {
  type Pending = {actor:Session;command:Command;id:string;now:number}
  const queueKey='coffeeman.pending.v1'
  let queue:Pending[] = JSON.parse(localStorage.getItem(queueKey) || '[]')
- let base=emptyState(), loaded=false, flushing=false
+ let base=emptyState(), loaded=false
+ let flushing: Promise<void> | undefined
  const listeners=new Set<(state:ReturnType<typeof emptyState>)=>void>()
  function persist(){localStorage.setItem(queueKey,JSON.stringify(queue))}
  function projected(){let state=base;for(const p of queue){try{state=applyCommand(state,p.actor,p.command,{id:p.id,now:p.now})}catch{/* server conflict is reported during flush */}}return state}
  function publish(){for(const listener of listeners)listener(projected())}
- async function flush(){if(flushing||!connected||!queue.length)return;flushing=true;try{while(queue.length&&connected){const p=queue[0];try{await change(raw=>merge(raw,applyCommand(stateOf(raw),p.actor,p.command,{id:p.id,now:p.now})),p.id);base=normalizeState((await get(root)).val());queue.shift();persist();publish()}catch{break}}}finally{flushing=false}}
+ function flush() {
+   if (!flushing && connected && queue.length) {
+     flushing = flushQueue().finally(() => { flushing = undefined })
+   }
+   return flushing
+ }
+ async function flushQueue() {
+   while (queue.length && connected) {
+     const pending = queue[0]
+     try {
+       await change(raw => merge(raw, applyCommand(stateOf(raw), pending.actor, pending.command, { id: pending.id, now: pending.now })), pending.id)
+       base = normalizeState((await get(root)).val())
+       queue.shift()
+       persist()
+       publish()
+     } catch { break }
+   }
+ }
  window.setInterval(()=>{void flush()},10000)
  const alias = (name: string) => name.normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU')
  async function change(transform: (raw: unknown) => unknown, operationId: string) {
@@ -109,6 +127,7 @@ export function createFirebaseStore(): Store {
  const result = await runTransaction(root, transform, {applyLocally:false})
  if (!result.committed) throw new Error('Операция не подтверждена')
  window.dispatchEvent(new CustomEvent('coffeeman-sync-confirmed',{detail:{operationId}}))
+ return result.snapshot
  } catch(e) { warn((e as {code?:string})?.code || 'sync/unknown'); throw e }
  finally { window.clearInterval(timer) }
  }
@@ -160,6 +179,28 @@ export function createFirebaseStore(): Store {
  const now=Date.now()
  if(!loaded)throw new Error('Дождитесь загрузки данных')
  applyCommand(projected(),actor,command,{id:operationId,now})
+ if (command.type === 'moveOrder') {
+   if (!connected || !navigator.onLine) throw new Error('Подключитесь к сети, чтобы проверить свободные столы')
+   await flush()
+   if (queue.length) throw new Error('Дождитесь синхронизации заказа и повторите пересадку')
+
+   let rejected: DomainError | undefined
+   const snapshot = await change(raw => {
+     rejected = undefined
+     try {
+       return merge(raw, applyCommand(stateOf(raw), actor, command, { id: operationId, now }))
+     } catch (error) {
+       if (!(error instanceof DomainError)) throw error
+       rejected = error
+       // Returning the input lets Firebase retry if the cached state was stale.
+       return raw
+     }
+   }, operationId)
+   base = normalizeState(snapshot.val())
+   publish()
+   if (rejected) throw rejected
+   return
+ }
  queue.push({actor,command,id:operationId,now});try{persist()}catch(e){queue.pop();throw e}publish();void flush()
  }
  }
