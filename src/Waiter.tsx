@@ -9,12 +9,13 @@ import {
   availableQuantity, entries, orderAlerts, orderStatus, orderStatusLabel, orderTitle, orderTotal, stats, stockStatus,
 } from './domain'
 import type { Command, Product, Session, State } from './domain'
+import { configureServedRemoval } from './device-verification'
 import { ActionRow, Empty, IconButton, Segmented, Sheet, money } from './ui'
 
 type Period = 'day' | 'week' | 'month'
 export type ProfileScreen = 'profile' | 'stats' | 'history' | 'settings'
 export type Preferences = typeof defaultPreferences
-export const defaultPreferences = { sound: false, vibration: false, ready: true, delay: true, stock: true, connection: true }
+export const defaultPreferences = { sound: true, vibration: true, ready: true, delay: true, stock: true, connection: true }
 
 export function Toggle({ text, detail, icon, value, onChange }: {text: string; detail?: string; icon?: ReactNode; value: boolean; onChange: (value: boolean) => void}) {
   return <label className="toggle-row">{icon}<span className="toggle-caption">{text}{detail && <small>{detail}</small>}</span>
@@ -172,14 +173,28 @@ const preferenceRows = [
   { key: 'connection', label: 'Состояние синхронизации', Icon: Wifi },
 ] as const
 
-export function Profile({ state, user, now, screen, navigate, preferences, setPreference, connection, period, setPeriod, onInstall, notify, openOrder, logout }: {
+export function Profile({ state, user, now, screen, navigate, preferences, setPreference, connection, period, setPeriod, onInstall, notify, openOrder, logout,
+  testSignals, removalEnabled, setRemovalEnabled }: {
   state: State; user: Session; now: number; screen: ProfileScreen; navigate: (screen: ProfileScreen) => void; preferences: Preferences;
   setPreference: (key: keyof Preferences, value: boolean) => void; connection: string; period: Period; setPeriod: (period: Period) => void;
   onInstall?: () => void; notify: () => void; openOrder: (id: string) => void; logout: () => void;
+  testSignals: () => void; removalEnabled: boolean; setRemovalEnabled: (enabled: boolean) => void;
 }) {
   const [info, setInfo] = useState(false)
+  const [configuringRemoval, setConfiguringRemoval] = useState(false)
+  const [removalError, setRemovalError] = useState('')
   const title = { profile: 'Профиль', stats: 'Моя статистика', history: 'История заказов', settings: 'Настройки' }
   const name = state.users[user.userId]?.name ?? user.name
+  const updateRemoval = async (enabled: boolean) => {
+    setRemovalError('')
+    setConfiguringRemoval(true)
+    try {
+      await configureServedRemoval(user.userId, name, enabled)
+      setRemovalEnabled(enabled)
+    } catch (error) {
+      setRemovalError(error instanceof Error && error.name === 'Error' ? error.message : 'Подтверждение отменено или недоступно. Проверьте настройки разблокировки устройства.')
+    } finally { setConfiguringRemoval(false) }
+  }
   const today = stats(state, 'day', user.userId, now)
   const current = stats(state, period, user.userId, now)
   const start = new Date(now)
@@ -216,7 +231,16 @@ export function Profile({ state, user, now, screen, navigate, preferences, setPr
       </button>,
     )}{history.length === 0 && <div className="panel"><Empty icon={<ClipboardList size={21} />} title="За этот период заказов нет" /></div>}</div>}
     {screen === 'settings' && <>
-      <div className="settings-group panel">{preferenceRows.map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />} detail={key === 'connection' ? connection : undefined} value={preferences[key]} onChange={value => setPreference(key, value)} />)}</div>
+      <div className="settings-group panel">{preferenceRows.map(({ key, label, Icon }) => <Toggle key={key} text={label} icon={<Icon size={18} />}
+        detail={key === 'connection' ? connection : key === 'vibration' && !navigator.vibrate ? 'В этом браузере вибрация доступна только через системные уведомления' : undefined}
+        value={preferences[key]} onChange={value => setPreference(key, value)} />)}
+        <ActionRow icon={<Bell size={18} />} label="Проверить оповещения" onClick={testSignals} />
+      </div>
+      <div className="settings-group panel">
+        <Toggle text="Удаление выданных позиций" detail={configuringRemoval ? 'Ожидает подтверждения на устройстве…' : 'В тестировании · Face ID, отпечаток или код устройства'}
+          icon={<Smartphone size={18} />} value={removalEnabled} onChange={value => { if (!configuringRemoval) void updateRemoval(value) }} />
+        {removalError && <p className="sheet-note" role="alert">{removalError}</p>}
+      </div>
       <div className="action-list panel">
         {onInstall && <ActionRow icon={<Smartphone size={18} />} label="Как установить приложение" onClick={onInstall} />}
         <ActionRow icon={<Info size={18} />} label="О приложении" detail="Версия 1.0.0" onClick={() => setInfo(true)} />

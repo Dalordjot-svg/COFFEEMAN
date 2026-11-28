@@ -29,6 +29,32 @@ function addCheesecake(execute: ReturnType<typeof fixture>['execute'], orderId: 
   execute({ type: 'addItem', orderId, guestId: 'guest-1', itemId, productId: 'cheesecake', quantity }, actor)
 }
 
+it('снимает предупреждение после выдачи и оставляет списание при удалении выданной позиции', () => {
+  const { execute, state } = fixture()
+  const orderId = 'order-void'
+  const itemId = 'cheesecake-one'
+  execute({ type: 'saveProduct', product: { ...state().products.cheesecake, cost: 70 } }, admin)
+  execute({ type: 'createOrder', orderId, tableId: 'table-12', guestCount: 1 })
+  addCheesecake(execute, orderId)
+  execute({ type: 'sendOrder', orderId })
+  execute({ type: 'readyItem', orderId, itemId })
+  execute({ type: 'serveItem', orderId, itemId })
+  const served = state()
+  expect(orderStatus(served.orders[orderId])).toBe('served')
+  expect(orderAlerts(served, timestamp + 45 * minute).some(alert => alert.orderId === orderId)).toBe(false)
+  expect(() => execute({ type: 'voidServedItem', orderId, itemId }, anna)).toThrow(/другому официанту/)
+  execute({ type: 'voidServedItem', orderId, itemId })
+  const voided = state()
+  expect(voided.orders[orderId].items[itemId].status).toBe('canceled')
+  expect(orderTotal(voided.orders[orderId])).toBe(0)
+  expect(voided.inventory).toEqual(served.inventory)
+  expect(voided.inventoryTransactions).toEqual(served.inventoryTransactions)
+  execute({ type: 'closeOrder', orderId })
+  expect(orderStatus(state().orders[orderId])).toBe('closed')
+  const after = stats({ ...state(), orders: { [orderId]: state().orders[orderId] } }, 'day', pasha.userId, timestamp + minute)
+  expect(after).toMatchObject({ sales: 0, grossProfit: -70 })
+})
+
 it('пересаживает активный заказ целиком и отклоняет занятие одного стола двумя заказами', () => {
   const { execute, state } = fixture()
   const orderId = 'order-move'

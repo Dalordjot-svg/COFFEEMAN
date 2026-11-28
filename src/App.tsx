@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { emptyState, entries, orderAlerts, orderTitle } from './domain'
 import type { Command, Session } from './domain'
+import { confirmServedRemoval, hasRemovalCredential } from './device-verification'
 import { useInstallGuide } from './InstallGuide'
 import { Orders } from './Orders'
 import type { OrdersScreen } from './Orders'
@@ -24,6 +25,18 @@ const tabs = [
   {page: 'stock', title: 'Стоп-лист', Icon: Ban},
   {page: 'profile', title: 'Профиль', Icon: UserRound},
 ] as const
+
+function playAlertTone(context: AudioContext) {
+  const oscillator = context.createOscillator()
+  const volume = context.createGain()
+  const start = context.currentTime
+  oscillator.frequency.value = 740
+  volume.gain.setValueAtTime(0.24, start)
+  volume.gain.exponentialRampToValueAtTime(0.001, start + 0.4)
+  oscillator.connect(volume).connect(context.destination)
+  oscillator.start(start)
+  oscillator.stop(start + 0.4)
+}
 
 function sameScreen(a: Screen | undefined, b: Screen) {
   if (!a || a.page !== b.page) return false
@@ -116,6 +129,7 @@ export default function App() {
   const [now, setNow] = useState(Date.now)
   const [seen, setSeen] = useState(Date.now)
   const [preferences, setPreferences] = useState(defaultPreferences)
+  const [removalEnabled, setRemovalEnabled] = useState(false)
   const [stockFilter, setStockFilter] = useState<'all' | 'out' | 'low' | 'in'>('all')
   const [stockQuery, setStockQuery] = useState('')
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day')
@@ -132,7 +146,11 @@ export default function App() {
     let subscribed = true
     runRestore.current ??= store.restore()
     runRestore.current.then(value => {
-      if (subscribed) { setSession(value); setPreferences(loadPreferences(value?.userId)) }
+      if (subscribed) {
+        setSession(value)
+        setPreferences(loadPreferences(value?.userId))
+        setRemovalEnabled(Boolean(value && hasRemovalCredential(value.userId)))
+      }
     }).catch(err => {
       if (subscribed) setError(err instanceof Error ? err.message : 'Не удалось восстановить сессию.')
     }).finally(() => { if (subscribed) setLoading(false) })
@@ -167,6 +185,23 @@ export default function App() {
     return () => clearTimeout(timer.current)
   }, [toast])
 
+  useEffect(() => {
+    if (!preferences.sound) return
+    const activate = () => { void unlockSound().catch(() => undefined) }
+    document.addEventListener('click', activate, true)
+    document.addEventListener('keydown', activate, true)
+    return () => {
+      document.removeEventListener('click', activate, true)
+      document.removeEventListener('keydown', activate, true)
+    }
+  }, [preferences.sound])
+
+  async function unlockSound(preview = false) {
+    const context = audio.current ??= new AudioContext()
+    if (context.state !== 'running') await context.resume()
+    if (preview && context.state === 'running') playAlertTone(context)
+  }
+
   const visibleNotices = entries(state.notifications).filter(notice =>
     (!notice.userId || notice.userId === session?.userId) && preferences[notice.type],
   ).sort((a, b) => b.at - a.at)
@@ -177,28 +212,15 @@ export default function App() {
   ]
   const liveSignature = JSON.stringify(liveSignals)
   useEffect(() => {
-    if (!session || modal === 'notifications') return
+    if (!session) return
     const signals = JSON.parse(liveSignature) as typeof liveSignals
-    const next = signals.find(signal => !delivered.current.has(signal.id))
+    const next = signals.find(signal => !delivered.current.has(signal.id) && !(demo && signal.id.startsWith('alert_demo-')))
     signals.forEach(signal => delivered.current.add(signal.id))
     if (!next) return
-    // The initial demo data illustrates alerts without producing sound or toasts at login.
-    if (demo && next.id.startsWith('alert_demo-')) return
-    setToast(next.message)
-    if (preferences.vibration && 'vibrate' in navigator) navigator.vibrate([120,70,120])
+    if (modal !== 'notifications') setToast(next.message)
+    if (preferences.vibration) navigator.vibrate?.([120, 70, 120])
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) { void navigator.serviceWorker?.ready.then(reg => reg.showNotification('COFFEEMAN', {body:next.message,tag:next.id})).catch(()=>undefined) }
-    if (preferences.sound && audio.current?.state === 'running') {
-      const audioContext = audio.current
-      const oscillator = audioContext.createOscillator()
-      const volume = audioContext.createGain()
-      oscillator.frequency.value = 660
-      volume.gain.value = 0.12
-      volume.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + .27)
-      oscillator.connect(volume)
-      volume.connect(audioContext.destination)
-      oscillator.start()
-      oscillator.stop(audioContext.currentTime + .27)
-    }
+    if (preferences.sound && audio.current) void unlockSound(true).catch(() => undefined)
   }, [liveSignature, modal, session, preferences.sound, preferences.vibration, demo])
 
   useEffect(() => {
@@ -248,15 +270,14 @@ export default function App() {
       setToast(err instanceof Error ? err.message : 'Не удалось завершить сеанс.')
     }
   }
-  const unlockSound = () => {
-    try {
-      audio.current ??= new AudioContext()
-      if (audio.current.state !== 'running') void audio.current.resume().catch(() => undefined)
-    } catch { /* Audio is optional on this device. */ }
+  const testSignals = () => {
+    const vibrated = preferences.vibration && navigator.vibrate?.([120, 70, 120])
+    if (preferences.sound) void unlockSound(true).catch(() => setToast('Браузер не смог воспроизвести звук'))
+    setToast(preferences.sound || vibrated ? 'Проверка оповещений' : 'Включите звук или вибрацию в настройках устройства и приложения')
   }
   const updatePreference = (key: keyof Preferences, value: boolean) => {
-    if (key === 'sound' && value) unlockSound()
-    if (key === 'vibration' && value && 'vibrate' in navigator) navigator.vibrate(65)
+    if (key === 'sound' && value) void unlockSound(true).catch(() => setToast('Браузер не смог воспроизвести звук'))
+    if (key === 'vibration' && value) navigator.vibrate?.(65)
     const updated = {...preferences, [key]: value}
     setPreferences(updated)
     try { localStorage.setItem('coffeeman:preferences:' + session?.userId, JSON.stringify(updated)) }
@@ -273,6 +294,7 @@ export default function App() {
     setSeen(Date.now())
     setSession(value)
     setPreferences(loadPreferences(value.userId))
+    setRemovalEnabled(hasRemovalCredential(value.userId))
     navigate({page: 'home'}, true)
   }} />{installDialog}</>
 
@@ -282,7 +304,7 @@ export default function App() {
   const withNav = !admin && !!tab
   const orderView = screen.page === 'orders' || screen.page === 'tables' || screen.page === 'order' || screen.page === 'catalog'
   const showOrders = orderView && (!admin || screen.page === 'order' || screen.page === 'catalog')
-  return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`} onPointerDown={preferences.sound ? unlockSound : undefined}>
+  return <div className={`app-shell ${withNav ? 'with-nav' : ''} ${modal === 'quick' ? 'showing-quick' : ''}`}>
     {!connected && !demo && <div className="offline-bar" role="status"><WifiOff size={17} /> Нет связи с Firebase. Изменения доступны после подключения.</div>}
     {admin ? <div hidden={showOrders}>
       <button type="button" onClick={openNotifications}>Уведомления {visibleNotices.filter(n=>n.at>seen).length || ''}</button>
@@ -296,10 +318,12 @@ export default function App() {
         {screen.page === 'stock' && <Stock state={state} execute={execute} filter={stockFilter} onFilter={setStockFilter} query={stockQuery} onQuery={setStockQuery} />}
         {screen.page === 'profile' && <Profile state={state} user={session} now={now} screen={screen.view ?? 'profile'}
           navigate={view => navigate({page: 'profile', view})} preferences={preferences} setPreference={updatePreference}
+          testSignals={testSignals} removalEnabled={removalEnabled} setRemovalEnabled={setRemovalEnabled}
           connection={connection} period={period} setPeriod={setPeriod} onInstall={openGuide} notify={openNotifications} openOrder={openOrder} logout={() => void logout()} />}
       </>}
     {(!admin || showOrders) && <div hidden={!showOrders}>
-      <Orders state={state} user={session} execute={execute} screen={orderView ? screen : {page: 'orders'}} navigate={orderNavigate} openQuick={() => setModal('quick')} />
+      <Orders state={state} user={session} execute={execute} verifyServedRemoval={removalEnabled ? () => confirmServedRemoval(session.userId) : undefined}
+        screen={orderView ? screen : {page: 'orders'}} navigate={orderNavigate} openQuick={() => setModal('quick')} />
     </div>}
     {withNav && <nav className="bottom-nav" aria-label="Основная навигация">
       {tabs.map(({ page, title, Icon }) => <button type="button" key={page} aria-current={tab === page ? 'page' : undefined} onClick={() => {

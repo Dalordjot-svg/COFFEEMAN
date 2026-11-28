@@ -96,6 +96,7 @@ const auditNames: Record<string, string> = {
   readyItem: 'Готовность позиции',
   serveItem: 'Выдача позиции',
   cancelItem: 'Отмена позиции',
+  voidServedItem: 'Удаление выданной позиции',
   cancelOrder: 'Отмена заказа',
   precheckOrder: 'Запрос пречека',
   closeOrder: 'Завершение заказа',

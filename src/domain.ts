@@ -69,6 +69,7 @@ export type Command =
   | { type: 'setCustomItemPrice'; orderId: string; itemId: string; price: number }
   | { type: 'editItem'; orderId: string; itemId: string; guestId?: string; quantity?: number; sizeId?: string; optionIds?: string[]; customSyrup?: string; comment?: string }
   | { type: 'cancelItem' | 'readyItem' | 'serveItem' | 'unreadyItem'; orderId: string; itemId: string }
+  | { type: 'voidServedItem'; orderId: string; itemId: string }
   | { type: 'sendOrder' | 'precheckOrder' | 'closeOrder' | 'cancelOrder' | 'reopenOrder' | 'readyOrder'; orderId: string }
   | ({ type: 'updateInventory'; productId: string; available?: boolean } & InventoryInput)
   | { type: 'saveProduct'; product: Product; inventory?: InventoryInput; modifiers?: Modifier[]; preserveAvailability?: boolean }
@@ -92,7 +93,7 @@ export const defaultSettings: Settings = {
 }
 
 export const orderStatusLabel: Record<OrderStatus, string> = {
-  new: 'Новый заказ', preparing: 'Готовится', ready: 'Блюда готовы', served: 'Выдан',
+  new: 'Новый заказ', preparing: 'Готовится', ready: 'Блюда готовы', served: 'Все позиции выданы',
   precheck: 'Заказ в пречеке', closed: 'Завершён', canceled: 'Отменён',
 }
 
@@ -226,6 +227,12 @@ export function orderTotal(order: Order): number {
   return orderItems(order).reduce((total, item) => total + cents(item.unitPrice) * item.quantity, 0) / 100
 }
 
+export function isOrderServed(order: Order): boolean {
+  const items = orderItems(order)
+  if (items.length) return items.every(item => item.status === 'served')
+  return entries(order.items).some(item => item.status === 'canceled' && item.servedAt !== undefined)
+}
+
 export function orderTitle(order: Order): string {
   return order.label
 }
@@ -237,7 +244,7 @@ export function orderStatus(order: Order): OrderStatus {
   const items = orderItems(order)
   if (items.some(item => item.status === 'ready')) return 'ready'
   if (items.some(item => item.status === 'preparing')) return 'preparing'
-  if (items.length && items.every(item => item.status === 'served')) return 'served'
+  if (isOrderServed(order)) return 'served'
   return 'new'
 }
 
@@ -288,7 +295,8 @@ export function stats(state: State, period: Period, userId?: string, now = Date.
     const index = period === 'day' ? closed.getHours() : period === 'week' ? (closed.getDay() + 6) % 7 : closed.getDate() - 1
     const amount = cents(orderTotal(order))
     saleCents += amount
-    for (const item of orderItems(order)) {
+    for (const item of entries(order.items)) {
+      if (item.status === 'canceled' && item.servedAt === undefined) continue
       if (numeric(item.unitCost) && item.unitCost >= 0) costCents += cents(item.unitCost) * item.quantity
       else missingCosts = true
     }
@@ -327,8 +335,6 @@ export function orderAlerts(state: State, now = Date.now(), userId?: string): Or
       add(minutesSince(oldestReady) >= readyMinutes ? 'Готовые блюда ждут выдачи' : 'Блюда готовы к выдаче', oldestReady, 'green')
     } else if ((!items.length || items.some(item => item.status === 'draft')) && minutesSince(order.updatedAt) >= waitMinutes) {
       add('Ожидает обслуживания', order.updatedAt, thresholdTone(minutesSince(order.updatedAt)))
-    } else if (items.length && items.every(item => item.status === 'served') && minutesSince(order.updatedAt) >= waitMinutes) {
-      add('Завершите обслуживание', order.updatedAt, thresholdTone(minutesSince(order.updatedAt)))
     }
   }
   const priority = { red: 0, yellow: 1, green: 2 }
@@ -770,6 +776,18 @@ export function applyCommand(previous: State, session: Session, command: Command
       detail = item.name
       break
     }
+    case 'voidServedItem': {
+      const order = activeOrder(state, session, command.orderId)
+      const item = itemIn(order, command.itemId)
+      requireCondition(item.status === 'served', 'Удалить можно только выданную позицию')
+      item.status = 'canceled'
+      item.servedAt ??= stamp.now
+      item.canceledAt = stamp.now
+      delete order.precheckAt
+      orderId = order.id
+      detail = item.name
+      break
+    }
     case 'cancelItem':
     case 'readyItem':
     case 'unreadyItem':
@@ -843,7 +861,7 @@ export function applyCommand(previous: State, session: Session, command: Command
     case 'closeOrder': {
       const order = activeOrder(state, session, command.orderId)
       const items = orderItems(order)
-      requireCondition(items.length && items.every(item => item.status !== 'draft'), 'Сначала отправьте все позиции')
+      requireCondition((items.length || (command.type === 'closeOrder' && isOrderServed(order))) && items.every(item => item.status !== 'draft'), 'Сначала отправьте все позиции')
       requireCondition(!items.some(item => item.pricePending), 'Укажите цены своих позиций перед расчётом')
       if (command.type === 'precheckOrder') {
         if (order.precheckAt !== undefined) return previous

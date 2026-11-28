@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  availableQuantity, entries, isActiveOrder, newId, orderAlerts, orderItems, orderStatus, orderStatusLabel, orderTitle, orderTotal, stockStatus,
+  availableQuantity, entries, isActiveOrder, isOrderServed, newId, orderAlerts, orderItems, orderStatus, orderStatusLabel, orderTitle, orderTotal, stockStatus,
   type Command, type Order, type OrderAlert, type OrderItem, type Product, type Session, type State,
 } from './domain';
 import './orders.css';
@@ -20,6 +20,7 @@ type OrdersProps = {
   state: State;
   user: Session;
   execute: (command: Command) => Promise<unknown>;
+  verifyServedRemoval?: () => Promise<void>;
   screen: OrdersScreen;
   navigate: (screen: OrdersScreen) => void;
   openQuick: () => void;
@@ -162,19 +163,29 @@ function OrderSheet({ title, children, onClose, locked = false }: {
     const dialog = surface.current;
     dialog?.showModal();
     const viewport = window.visualViewport;
+    let lastHeight = viewport?.height ?? window.innerHeight;
+    let scrollFrame = 0;
     const fitViewport = () => {
       if (!dialog || !viewport || viewport.scale !== 1) return;
       // Safari may resize only the visual viewport when the software keyboard opens.
       const obscured = Math.max(0, document.documentElement.clientHeight - viewport.height - viewport.offsetTop);
       dialog.style.setProperty('--order-viewport-height', viewport.height + 'px');
       dialog.style.setProperty('--order-viewport-offset', obscured + 'px');
+      const input = document.activeElement;
+      if (viewport.height < lastHeight - 80 && (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) && dialog.contains(input)) {
+        scrollFrame = requestAnimationFrame(() => input.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+      }
+      lastHeight = viewport.height;
     };
     fitViewport();
     viewport?.addEventListener('resize', fitViewport);
     viewport?.addEventListener('scroll', fitViewport);
+    window.addEventListener('resize', fitViewport);
     return () => {
       viewport?.removeEventListener('resize', fitViewport);
       viewport?.removeEventListener('scroll', fitViewport);
+      window.removeEventListener('resize', fitViewport);
+      cancelAnimationFrame(scrollFrame);
       if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
       closeTimer.current = null;
       dialog?.close();
@@ -238,7 +249,7 @@ function Stepper({ value, onChange, min = 1, max = 100, label, context = '' }: {
 type Mutations = {
   busy: boolean;
   error: string;
-  perform: (command: Command) => Promise<boolean>;
+  perform: (command: Command, authorize?: () => Promise<void>) => Promise<boolean>;
   clearError: () => void;
 };
 
@@ -246,12 +257,13 @@ function useMutations(execute: OrdersProps['execute']): Mutations {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const active = useRef(false);
-  const perform = async (command: Command) => {
+  const perform = async (command: Command, authorize?: () => Promise<void>) => {
     if (active.current) return false;
     active.current = true;
     setBusy(true);
     setError('');
     try {
+      if (authorize) await authorize();
       await execute(command);
       return true;
     } catch (failure) {
@@ -503,7 +515,7 @@ function FreeTables({ state, order, busy, onChoose }: {
   </>;
 }
 
-function Editor({ state, user, execute, navigate, order, from, now, alert }: OrdersProps & {
+function Editor({ state, user, execute, verifyServedRemoval, navigate, order, from, now, alert }: OrdersProps & {
   order: Order;
   from?: 'tables' | 'orders';
   now: number;
@@ -522,7 +534,7 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
   const drafts = items.filter((item) => item.status === 'draft');
   const ready = items.filter((item) => item.status === 'ready');
   const pending = items.filter((item) => item.pricePending);
-  const allServed = items.length > 0 && items.every(item => item.status === 'served');
+  const allServed = isOrderServed(order);
   const canPrecheck = items.length > 0 && drafts.length === 0 && !pending.length;
   const canCheckout = !pending.length && (allServed || order.precheckAt !== undefined);
   const unsent = items.every(item => item.status === 'draft');
@@ -670,10 +682,17 @@ function Editor({ state, user, execute, navigate, order, from, now, alert }: Ord
               }} />
               : <FormError text={mutation.error} />}
             {editable && (selected.status === 'draft' || selected.status === 'preparing' || selected.status === 'ready') && <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={() => { void itemAction('cancelItem', selected.id); }}><Ban size={17} />{selected.status === 'draft' ? 'Удалить позицию' : 'Отменить позицию'}</button>}
+            {editable && selected.status === 'served' && verifyServedRemoval && <>
+              <p className="order-sheet-caption">В тестировании. Удаление уберёт позицию из суммы заказа. Выданная порция останется списанной.</p>
+              <button type="button" className="secondary order-danger" disabled={mutation.busy} onClick={async () => {
+                if (await mutation.perform({ type: 'voidServedItem', orderId: order.id, itemId: selected.id }, verifyServedRemoval)) closeMenu();
+              }}><Ban size={17} />Удалить выданную позицию</button>
+            </>}
           </div>}
       </OrderSheet>}
       {menu && <OrderSheet title={{ checkout: 'Позиции для кассы', cancel: cancelLabel + '?', move: 'Пересадить за другой стол', options: 'Действия заказа' }[menu]} onClose={closeMenu} locked={mutation.busy}>
         {menu === 'checkout' ? <div className="order-sheet-content">
+          {!items.length && <p className="order-sheet-caption">Все позиции удалены. Сумма к расчёту 0 ₽.</p>}
           <div className="order-sheet-list">
             {items.map(item => <div className="order-checkout-line" key={item.id}>
               <span>{item.quantity} × {item.name}
